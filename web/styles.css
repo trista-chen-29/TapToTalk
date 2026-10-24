@@ -110,3 +110,44 @@ h1 {
     grid-template-columns: 1fr;
   }
 }
+
+/* Patient selection is driven only by bridge state; keyboard focus is distinct. */
+.mode,
+h2 {
+  font-size: 32px;
+  margin: 24px 0 16px;
+}
+
+ul.grid {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.grid > li {
+  min-width: 0;
+}
+
+.phrase-button {
+  width: 100%;
+  height: 100%;
+  font-family: inherit;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.tile.highlight {
+  box-shadow: inset 0 0 0 4px var(--ink);
+}
+
+.tile.highlight::before {
+  content: "➤";
+  margin-right: 12px;
+}
+
+.phrase-button:focus-visible {
+  outline: 6px dashed #141414;
+  outline-offset: 4px;
+}

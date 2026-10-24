@@ -138,6 +138,13 @@ Rules:
 
 Transport: WebSocket from the bridge at `ws://localhost:8765`. JSON messages.
 
+The bridge also serves the local patient page at `http://localhost:8765/`
+and the dashboard at `/dashboard.html`. HTTP and WebSocket share port 8765.
+On each WebSocket connection, the bridge sends an initial `state` snapshot
+(`mode: idle`, `highlight_index: 0`, `category: null`, `phrases: []`).
+The current connection demo displays receipt of this snapshot; it does not
+handle selections or drive the menu yet.
+
 State message, sent on every state change:
 
 ```json

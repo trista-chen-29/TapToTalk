@@ -28,7 +28,29 @@ This is the Friday-night scaffold, aligned with contract v1.1:
 - Each module has a hello entry point and a stub of its contract function.
 - Ranking returns the candidate ids unchanged. `speak(phrase_id, text)` and `send_alert(kind, phrase_id, timestamp)` return without calling out.
 
-The serial state machine, WebSocket server, audio clips, Claude, Cartesia, and Fetch.ai are the next work for the module owners. Requirement IDs FR12 through FR21 are recorded in the contract and are not built yet.
+The bridge serves the local pages and sends an initial state over WebSocket.
+The serial state machine, audio clips, Claude, Cartesia, and Fetch.ai are the next work for the module owners. Requirement IDs FR12 through FR21 are recorded in the contract and are not built yet.
+
+## Run the local bridge
+
+From the repo root, with Python 3.11+:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install 'aiohttp>=3.11,<4'
+python -m bridge.main
+```
+
+Open http://localhost:8765/ in a browser. It should show **Connected to bridge**
+and **Test message received: bridge state (idle).** The page receives that state
+over `ws://localhost:8765`, not from an HTTP response. Reloading opens a new
+connection; if the server stops, the page shows a disconnected status and retries.
+The dashboard is at http://localhost:8765/dashboard.html.
+
+This is a connection demo; keyboard, sensor, phrase selection, and nurse alerts
+are not connected yet. Stop the server with Ctrl+C. Both services bind only to
+localhost. Only the public web files are served.
 
 ## Run the hellos
 
@@ -36,12 +58,11 @@ From the repo root, with Python 3.11+:
 
 ```bash
 python firmware/main.py
-python -m bridge.main
 python -m ai.hello
 python -m unittest discover -s tests -v
 ```
 
-Open [`web/index.html`](web/index.html) and [`web/dashboard.html`](web/dashboard.html) in a browser. The patient page should show the word Hello. The highlight on that page is a placeholder until the bridge is connected.
+Use the local bridge URLs above rather than opening the HTML files directly.
 
 Lint the Python modules with [Ruff](https://docs.astral.sh/ruff/):
 

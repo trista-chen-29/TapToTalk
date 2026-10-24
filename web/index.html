@@ -5,21 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>TapToTalk</title>
     <link rel="stylesheet" href="styles.css" />
+    <script src="bridge.js" defer></script>
   </head>
   <body>
     <main class="screen">
       <p class="eyebrow">Communication aid</p>
       <h1>TapToTalk</h1>
-      <p class="status">Hello</p>
-      <div class="grid" role="list" aria-label="Phrase categories">
-        <div class="tile highlight" role="listitem" data-category="needs">Needs</div>
-        <div class="tile" role="listitem" data-category="pain_comfort">Pain / comfort</div>
-        <div class="tile" role="listitem" data-category="people">People</div>
-        <div class="tile" role="listitem" data-category="yes_no">Yes / no</div>
-      </div>
-      <p class="note">
-        Hello. The bridge is not connected, so this highlight is only a placeholder.
-      </p>
+      <p class="status" id="connection-status" role="status">Connecting to bridge…</p>
+      <p class="mode" id="current-mode" aria-live="polite">Mode: unavailable</p>
+      <h2>Categories</h2>
+      <ul class="grid" id="category-grid" aria-label="Phrase categories"></ul>
+      <h2 id="phrase-heading">Phrases</h2>
+      <ul class="grid" id="phrase-grid" aria-labelledby="phrase-heading"></ul>
+      <p class="note">Phrases appear when the bridge opens a category. Use Tab and Enter or Space to activate a phrase button.</p>
+      <p class="note" id="bridge-message" aria-live="polite">Waiting for a test message from the bridge.</p>
+      <p class="note">Bridge navigation and selection processing are not connected yet.</p>
       <p class="nav"><a href="dashboard.html">Nurse requests</a></p>
     </main>
   </body>
