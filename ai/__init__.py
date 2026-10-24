@@ -1,1 +1,1 @@
-"""Ranking, speech, and nurse-alert stubs. Live vendor calls are not wired yet."""
+"""Phrase ranking, speech, and nurse-alert helpers."""

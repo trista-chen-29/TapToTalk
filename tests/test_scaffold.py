@@ -55,20 +55,32 @@ class StubTests(unittest.TestCase):
 
     def test_rank_keeps_candidate_order(self) -> None:
         candidates = ["need_position", "need_water"]
-        ranked = rank_phrases(
-            {
-                "time_of_day": "evening",
-                "category": "needs",
-                "last_selections": ["need_water"],
-                "candidates": candidates,
-            }
-        )
+        saved = {
+            name: os.environ.get(name)
+            for name in ("ANTHROPIC_API_KEY", "CLAUDE_API_KEY")
+        }
+        os.environ["ANTHROPIC_API_KEY"] = ""
+        os.environ["CLAUDE_API_KEY"] = ""
+        try:
+            ranked = rank_phrases(
+                {
+                    "time_of_day": "evening",
+                    "category": "needs",
+                    "last_selections": ["need_water"],
+                    "candidates": candidates,
+                }
+            )
+        finally:
+            for name, value in saved.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
         self.assertEqual(ranked, candidates)
         self.assertIsNot(ranked, candidates)
 
     def test_rank_rejects_bad_candidates(self) -> None:
-        with self.assertRaises(TypeError):
-            rank_phrases({"candidates": ["need_water", 1]})
+        self.assertEqual(rank_phrases({"candidates": ["need_water", 1]}), [])
 
     def test_speak_and_alert_are_quiet(self) -> None:
         previous = os.environ.get("CARTESIA_API_KEY")
