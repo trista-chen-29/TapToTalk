@@ -14,15 +14,54 @@ const mode = document.getElementById("current-mode");
 const categoryGrid = document.getElementById("category-grid");
 const phraseGrid = document.getElementById("phrase-grid");
 const phraseHeading = document.getElementById("phrase-heading");
+const speakButton = document.getElementById("speak-button");
+const sendStatus = document.getElementById("send-status");
 let socket;
+let connected = false;
+let selectedPhrase = null;
+let currentSnapshot = null;
+let pendingSnapshot = null;
+
+function updateSpeak() {
+  speakButton.disabled = !connected || socket?.readyState !== WebSocket.OPEN ||
+    !selectedPhrase || pendingSnapshot !== null;
+  speakButton.textContent = pendingSnapshot === null ? "Speak" : "Sending…";
+  speakButton.setAttribute("aria-busy", String(pendingSnapshot !== null));
+  for (const item of phraseGrid.children) {
+    item.children[0].disabled = !connected || pendingSnapshot !== null;
+  }
+}
+
+function submitPhrase(phraseId) {
+  if (!connected || socket.readyState !== WebSocket.OPEN || !selectedPhrase ||
+      pendingSnapshot !== null) return;
+  // Share the submission guard with direct phrase activation.
+  pendingSnapshot = currentSnapshot;
+  sendStatus.textContent = "Sending selection to bridge… Speech is not confirmed.";
+  updateSpeak();
+  try {
+    socket.send(JSON.stringify({ type: "select", phrase_id: phraseId, source: "ui" }));
+  } catch {
+    pendingSnapshot = null;
+    sendStatus.textContent = "Could not send selection. Check the connection and try again.";
+    updateSpeak();
+  }
+}
+
+speakButton.addEventListener("click", () => {
+  if (selectedPhrase) submitPhrase(selectedPhrase.id);
+});
 
 function clearSelection() {
+  selectedPhrase = null;
+  currentSnapshot = null;
   for (const tile of categoryGrid.children) {
     tile.classList.remove("highlight");
     tile.removeAttribute("aria-current");
   }
   phraseGrid.replaceChildren();
   phraseHeading.textContent = "Phrases";
+  updateSpeak();
 }
 
 for (const [id, label] of categories) {
@@ -53,7 +92,17 @@ function renderState(state) {
     return;
   }
 
+  const snapshot = JSON.stringify([
+    state.mode, state.category, state.highlight_index, phrases.map((phrase) => phrase.id),
+  ]);
+  if (pendingSnapshot !== null && snapshot !== pendingSnapshot) {
+    pendingSnapshot = null;
+    sendStatus.textContent = "Bridge state updated. Speech is not confirmed.";
+  }
   clearSelection();
+  currentSnapshot = snapshot;
+  if (state.mode === "phrase") selectedPhrase = phrases[state.highlight_index];
+  updateSpeak();
   mode.textContent = `Mode: ${state.mode}`;
   // Retain the Task 1 diagnostic so the connection smoke test stays useful.
   message.textContent = `Test message received: bridge state (${state.mode}).`;
@@ -79,18 +128,21 @@ function renderState(state) {
       button.setAttribute("aria-current", "true");
     }
     button.addEventListener("click", () => {
-      if (socket.readyState !== WebSocket.OPEN) return;
-      socket.send(JSON.stringify({ type: "select", phrase_id: phrase.id, source: "ui" }));
+      submitPhrase(phrase.id);
       // Wait for the bridge's next state. Focus is not selection highlighting.
     });
     item.append(button);
     phraseGrid.append(item);
   });
+  updateSpeak();
 }
 
 function connect() {
   socket = new WebSocket(`ws://${window.location.host}/`);
   socket.addEventListener("open", () => {
+    connected = true;
+    clearSelection();
+    updateSpeak();
     status.textContent = "Connected to bridge";
     message.textContent = "Waiting for bridge state.";
   });
@@ -104,9 +156,16 @@ function connect() {
     }
   });
   socket.addEventListener("error", () => {
+    connected = false;
+    updateSpeak();
     status.textContent = "Bridge connection unavailable";
   });
   socket.addEventListener("close", () => {
+    connected = false;
+    if (pendingSnapshot !== null) {
+      sendStatus.textContent = "Connection lost. Selection outcome is unknown; nothing will be resent automatically.";
+    }
+    pendingSnapshot = null;
     clearSelection();
     mode.textContent = "Mode: unavailable";
     status.textContent = "Bridge disconnected — reconnecting…";
@@ -115,4 +174,5 @@ function connect() {
   });
 }
 
+updateSpeak();
 connect();

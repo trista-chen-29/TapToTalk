@@ -151,3 +151,33 @@ ul.grid {
   outline: 6px dashed #141414;
   outline-offset: 4px;
 }
+
+.speak-button {
+  display: block;
+  width: 100%;
+  min-height: 100px;
+  margin-top: 28px;
+  border: 4px solid var(--ink);
+  border-radius: 18px;
+  background: var(--ink);
+  color: var(--tile);
+  font: inherit;
+  font-size: 44px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.speak-button:disabled,
+.phrase-button:disabled {
+  cursor: not-allowed;
+}
+
+.speak-button:disabled {
+  background: #dedbd4;
+  color: #3a372f;
+}
+
+.speak-button:focus-visible {
+  outline: 6px dashed var(--ink);
+  outline-offset: 4px;
+}

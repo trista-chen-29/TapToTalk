@@ -22,7 +22,7 @@ function setup() {
     removeAttribute(k) { delete this.attributes[k]; }
     addEventListener(k, fn) { this.events[k] = fn; }
   }
-  const elements = Object.fromEntries(['connection-status', 'bridge-message', 'current-mode', 'category-grid', 'phrase-grid', 'phrase-heading'].map(id => [id, new Element()]));
+  const elements = Object.fromEntries(['connection-status', 'bridge-message', 'current-mode', 'category-grid', 'phrase-grid', 'phrase-heading', 'speak-button', 'send-status'].map(id => [id, new Element()]));
   const sockets = [];
   const timers = [];
   class Socket {
@@ -36,6 +36,7 @@ function setup() {
     WebSocket: Socket,
     window: { location: { host: 'localhost:8765' }, setTimeout: fn => timers.push(fn) },
   });
+  sockets[0].events.open();
   const receive = value => sockets.at(-1).events.message({ data: JSON.stringify(value) });
   const state = (mode, highlight_index = 0, category = null, phrases = []) => receive({ type: 'state', mode, highlight_index, category, phrases });
   return { elements, sockets, timers, receive, state };
@@ -132,4 +133,111 @@ test('phrase text is assigned as plain text, never HTML', () => {
   const { elements, state } = setup();
   state('phrase', 0, 'needs', [{ id: catalog.phrases[0].id, text: '<b>water</b>' }]);
   assert.equal(elements['phrase-grid'].children[0].children[0].textContent, '<b>water</b>');
+});
+
+test('Speak is enabled only for a valid highlighted phrase on an open connection', () => {
+  const { elements, state, sockets } = setup();
+  const speak = elements['speak-button'];
+  assert.equal(speak.disabled, true);
+  state('idle');
+  assert.equal(speak.disabled, true);
+  state('category', 2);
+  assert.equal(speak.disabled, true);
+  state('phrase', 1, 'needs', catalog.phrases.slice(0, 4));
+  assert.equal(speak.disabled, false);
+  sockets[0].readyState = 3;
+  speak.events.click();
+  assert.equal(sockets[0].sent.length, 0);
+  sockets[0].events.close();
+  assert.equal(speak.disabled, true);
+});
+
+test('Speak uses highlighted phrase, blocks rapid and cross-button duplicates, preserves highlight', () => {
+  const { elements, state, sockets } = setup();
+  state('phrase', 2, 'needs', catalog.phrases.slice(0, 4));
+  const speak = elements['speak-button'];
+  const buttons = elements['phrase-grid'].children.map(item => item.children[0]);
+  speak.events.click();
+  speak.events.click();
+  buttons[1].events.click();
+  assert.deepEqual(sockets[0].sent, [{ type: 'select', phrase_id: catalog.phrases[2].id, source: 'ui' }]);
+  assert.equal(speak.disabled, true);
+  assert.equal(speak.textContent, 'Sending…');
+  assert.equal(speak.attributes['aria-busy'], 'true');
+  assert.ok(buttons[2].classList.contains('highlight'));
+  assert.ok(buttons.every(button => button.disabled));
+  assert.match(elements['send-status'].textContent, /Speech is not confirmed/);
+});
+
+test('repeated state and alerts cannot unlock a pending submission; changed state can', () => {
+  const { elements, state, sockets, receive } = setup();
+  const phrases = catalog.phrases.slice(0, 4);
+  state('phrase', 0, 'needs', phrases);
+  elements['speak-button'].events.click();
+  state('phrase', 0, 'needs', phrases);
+  receive({ type: 'alert', kind: 'nurse_call' });
+  assert.equal(elements['speak-button'].disabled, true);
+  elements['speak-button'].events.click();
+  assert.equal(sockets[0].sent.length, 1);
+  state('phrase', 1, 'needs', phrases);
+  assert.equal(elements['speak-button'].disabled, false);
+  assert.match(elements['send-status'].textContent, /Speech is not confirmed/);
+  elements['speak-button'].events.click();
+  assert.equal(sockets[0].sent[1].phrase_id, phrases[1].id);
+});
+
+test('invalid state disables Speak and cannot send a stale phrase', () => {
+  const { elements, state, sockets } = setup();
+  state('phrase', 0, 'needs', catalog.phrases.slice(0, 4));
+  state('phrase', 8, 'needs', catalog.phrases.slice(0, 4));
+  assert.equal(elements['speak-button'].disabled, true);
+  elements['speak-button'].events.click();
+  assert.equal(sockets[0].sent.length, 0);
+});
+
+test('send failure restores controls without claiming speech', () => {
+  const { elements, state, sockets } = setup();
+  state('phrase', 0, 'needs', catalog.phrases.slice(0, 4));
+  sockets[0].send = () => { throw new Error('closed'); };
+  elements['speak-button'].events.click();
+  assert.equal(elements['speak-button'].disabled, false);
+  assert.equal(elements['speak-button'].textContent, 'Speak');
+  assert.equal(elements['speak-button'].attributes['aria-busy'], 'false');
+  assert.match(elements['send-status'].textContent, /Could not send selection/);
+});
+
+test('disconnect during sending reports unknown outcome and never automatically replays', () => {
+  const { elements, state, sockets, timers } = setup();
+  state('phrase', 0, 'needs', catalog.phrases.slice(0, 4));
+  elements['speak-button'].events.click();
+  sockets[0].events.close();
+  assert.equal(elements['speak-button'].disabled, true);
+  assert.match(elements['send-status'].textContent, /outcome is unknown/);
+  timers[0]();
+  sockets[1].events.open();
+  assert.equal(elements['speak-button'].disabled, true);
+  assert.equal(sockets[1].sent.length, 0);
+  state('phrase', 1, 'needs', catalog.phrases.slice(0, 4));
+  assert.equal(elements['speak-button'].disabled, false);
+  assert.equal(sockets[1].sent.length, 0);
+});
+
+test('direct phrase activation uses the same pending guard as Speak', () => {
+  const { elements, state, sockets } = setup();
+  state('phrase', 0, 'needs', catalog.phrases.slice(0, 4));
+  const button = elements['phrase-grid'].children[1].children[0];
+  button.events.click();
+  button.events.click();
+  elements['speak-button'].events.click();
+  assert.equal(sockets[0].sent.length, 1);
+  assert.equal(elements['speak-button'].disabled, true);
+});
+
+test('socket error disables Speak before the close event', () => {
+  const { elements, state, sockets } = setup();
+  state('phrase', 0, 'needs', catalog.phrases.slice(0, 4));
+  sockets[0].events.error();
+  assert.equal(elements['speak-button'].disabled, true);
+  elements['speak-button'].events.click();
+  assert.equal(sockets[0].sent.length, 0);
 });
