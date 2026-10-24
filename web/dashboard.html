@@ -7,15 +7,90 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="screen">
+    <main class="screen nurse-dashboard">
       <p class="eyebrow">Communication aid</p>
       <h1>Nurse requests</h1>
       <p class="banner">
         Simulated channel. This is not a hospital nurse-call system or an emergency service.
       </p>
-      <p class="empty">No alerts</p>
-      <p class="note">Nurse calls and no-activity alerts will be listed here.</p>
+      <p class="note" id="dashboard-connection" role="status">Connecting to bridge…</p>
+      <p class="note" id="alert-summary" role="status">0 alerts received in this tab.</p>
+      <p class="empty" id="alerts-empty">No alerts received in this tab.</p>
+      <ol class="alert-list" id="alert-list" aria-label="Received alerts"></ol>
+      <p class="note" id="dashboard-message" role="status">Waiting for alerts.</p>
+      <p class="note">This tab shows only alerts received while open. Reloading clears this view; missed alerts are not recovered. Acknowledgement and escalation updates are not connected.</p>
       <p class="nav"><a href="index.html">Patient screen</a></p>
     </main>
+    <script>
+      "use strict";
+
+      // Inline because the bridge serves dashboard.html but no dashboard JS asset.
+      const connection = document.getElementById("dashboard-connection");
+      const summary = document.getElementById("alert-summary");
+      const empty = document.getElementById("alerts-empty");
+      const list = document.getElementById("alert-list");
+      const feedback = document.getElementById("dashboard-message");
+      const received = new Set();
+      let total = 0;
+
+      function renderAlert(alert) {
+        if (!alert || alert.type !== "alert") return;
+        const validKind = (alert.kind === "nurse_call" && alert.phrase_id === "person_nurse") ||
+          (alert.kind === "no_activity" && alert.phrase_id === null);
+        const stamp = alert.timestamp;
+        const validTime = typeof stamp === "string" &&
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(stamp) &&
+          Number.isFinite(Date.parse(stamp)) &&
+          new Date(stamp).toISOString() === (stamp.includes(".") ? stamp : stamp.replace("Z", ".000Z"));
+        if (!validKind || !validTime) {
+          feedback.textContent = "An invalid alert was ignored. Existing alerts are unchanged.";
+          return;
+        }
+        // Suppress only exact event replays. The agent owns the 60-second dedupe rule.
+        const key = JSON.stringify([alert.kind, new Date(stamp).toISOString()]);
+        if (received.has(key)) return;
+        received.add(key);
+        total += 1;
+        const item = document.createElement("li");
+        item.className = "alert-card";
+        const heading = document.createElement("h2");
+        heading.textContent = alert.kind === "nurse_call" ? "Call nurse" : "No activity";
+        const time = document.createElement("time");
+        time.setAttribute("datetime", stamp);
+        time.textContent = `Raised: ${stamp} (UTC)`;
+        const status = document.createElement("p");
+        status.textContent = "Received in this tab. Acknowledgement status unavailable.";
+        item.append(heading, time, status);
+        list.prepend(item);
+        empty.hidden = true;
+        summary.textContent = `${total} alert${total === 1 ? "" : "s"} received in this tab.`;
+        feedback.textContent = `New alert: ${heading.textContent}.`;
+      }
+
+      function connectDashboard() {
+        const socket = new WebSocket(`ws://${window.location.host}/`);
+        socket.addEventListener("open", () => {
+          connection.textContent = "Connected to local bridge";
+          feedback.textContent = "Listening for alerts. Earlier or missed alerts are not recovered.";
+        });
+        socket.addEventListener("message", (event) => {
+          try {
+            renderAlert(JSON.parse(event.data));
+          } catch {
+            feedback.textContent = "An unreadable message was ignored. Existing alerts are unchanged.";
+          }
+        });
+        socket.addEventListener("error", () => {
+          connection.textContent = "Bridge unavailable — new alerts may be missed.";
+        });
+        socket.addEventListener("close", () => {
+          connection.textContent = "Disconnected — reconnecting. New alerts may be missed.";
+          feedback.textContent = "Previously received alerts remain visible. Missed alerts are not recovered.";
+          window.setTimeout(connectDashboard, 2000);
+        });
+      }
+
+      connectDashboard();
+    </script>
   </body>
 </html>
