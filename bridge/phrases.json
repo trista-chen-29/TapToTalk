@@ -1,0 +1,21 @@
+{
+  "categories": ["needs", "pain_comfort", "people", "yes_no"],
+  "phrases": [
+    {"id": "need_water", "text": "I need water", "category": "needs"},
+    {"id": "need_bathroom", "text": "I need the bathroom", "category": "needs"},
+    {"id": "need_suction", "text": "I need suction", "category": "needs"},
+    {"id": "need_position", "text": "Please change my position", "category": "needs"},
+    {"id": "pain_here", "text": "I am in pain", "category": "pain_comfort"},
+    {"id": "pain_medicine", "text": "I need pain medicine", "category": "pain_comfort"},
+    {"id": "comfort_hot", "text": "I am too hot", "category": "pain_comfort"},
+    {"id": "comfort_cold", "text": "I am too cold", "category": "pain_comfort"},
+    {"id": "person_nurse", "text": "Call nurse", "category": "people"},
+    {"id": "person_family", "text": "Please call my family", "category": "people"},
+    {"id": "person_doctor", "text": "I want to see the doctor", "category": "people"},
+    {"id": "person_thanks", "text": "Thank you", "category": "people"},
+    {"id": "yes_yes", "text": "Yes", "category": "yes_no"},
+    {"id": "yes_no", "text": "No", "category": "yes_no"},
+    {"id": "yes_not_sure", "text": "I am not sure", "category": "yes_no"},
+    {"id": "yes_repeat", "text": "Please say that again", "category": "yes_no"}
+  ]
+}
