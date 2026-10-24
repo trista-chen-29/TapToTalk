@@ -1,0 +1,18 @@
+[project]
+name = "taptotalk"
+version = "0.1.0"
+description = "Communication aid prototype. A finger tap selects a phrase and the laptop speaks it."
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = ["ai", "bridge", "tests"]
+extend-exclude = ["firmware"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ai", "bridge"]
