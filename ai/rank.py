@@ -1,31 +1,42 @@
 """Phrase ranking. CONTRACT.md section 8.
 
 Claude reorders the candidate ids. A timeout, error, or invalid response
-returns the candidate list unchanged. Caching is intentionally not here.
+returns the candidate list unchanged. A successful ranking is remembered
+in memory for 60 seconds. Failures are not cached.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import threading
+import time
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 _TIMEOUT_SECONDS = 3.0
+_CACHE_SECONDS = 60.0
 _DEFAULT_MODEL = "claude-haiku-5-5"
 _TIME_OF_DAY = frozenset({"morning", "afternoon", "evening", "night"})
 _ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 _ALLOWED_KEYS = ("time_of_day", "category", "last_selections", "candidates")
+_cache: dict[str, tuple[float, list[str]]] = {}
+_cache_lock = threading.Lock()
 
 
 def rank_phrases(
     context: dict[str, object],
     client: object | None = None,
+    *,
+    clock: Callable[[], float] | None = None,
 ) -> list[str]:
     """Return candidate ids in ranked order, or the original order on failure."""
+    now = time.monotonic if clock is None else clock
     try:
         candidates = _candidate_ids(context)
     except Exception:
@@ -34,11 +45,46 @@ def rank_phrases(
         payload = _ranking_context(context, candidates)
         if payload is None:
             return candidates
+        cached = _cached_ranking(payload, now)
+        if cached is not None:
+            return cached
         raw = _call_with_deadline(client, payload)
         ranked = _accepted_order(raw, candidates)
-        return ranked if ranked is not None else candidates
+        if ranked is None:
+            return candidates
+        _store_ranking(payload, ranked, now)
+        return list(ranked)
     except Exception:
         return candidates
+
+
+def _cache_key(payload: dict[str, object]) -> str:
+    encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _cached_ranking(
+    payload: dict[str, object],
+    clock: Callable[[], float],
+) -> list[str] | None:
+    key = _cache_key(payload)
+    with _cache_lock:
+        stored = _cache.get(key)
+        if stored is None:
+            return None
+        stored_at, ranking = stored
+        if clock() - stored_at >= _CACHE_SECONDS:
+            return None
+        return list(ranking)
+
+
+def _store_ranking(
+    payload: dict[str, object],
+    ranking: list[str],
+    clock: Callable[[], float],
+) -> None:
+    with _cache_lock:
+        _cache[_cache_key(payload)] = (clock(), list(ranking))
 
 
 def _candidate_ids(context: dict[str, object]) -> list[str]:
