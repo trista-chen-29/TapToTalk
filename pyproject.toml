@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "Communication aid prototype. A finger tap selects a phrase and the laptop speaks it."
 requires-python = ">=3.11"
 readme = "README.md"
-dependencies = ["aiohttp>=3.11,<4"]
+dependencies = [
+    "aiohttp>=3.11,<4",
+    "miniaudio>=1.71,<2",
+    "python-dotenv>=1.2,<2",
+    "cartesia>=4.2,<5",
+]
 
 [tool.ruff]
 target-version = "py311"
