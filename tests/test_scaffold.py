@@ -1,7 +1,8 @@
-"""Locks the Step 0 catalog and the contract stubs."""
+"""Locks the v1.1 catalog, profile, and contract stubs."""
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,8 +11,10 @@ from ai.alert import send_alert
 from ai.hello import echo
 from ai.rank import rank_phrases
 from ai.speak import speak
-from bridge.log import save_selection
-from bridge.phrases import CALL_NURSE_ID, CATEGORIES, load_phrases
+from bridge.commands import LED_COMMANDS, cfg_hold_ms
+from bridge.log import connect, save_selection
+from bridge.phrases import CALL_NURSE_ID, CATEGORIES, load_phrases, phrases_path
+from bridge.profile import load_profile
 
 EXPECTED = (
     ("need_water", "I need water", "needs"),
@@ -67,8 +70,15 @@ class StubTests(unittest.TestCase):
             rank_phrases({"candidates": ["need_water", 1]})
 
     def test_speak_and_alert_are_quiet(self) -> None:
-        self.assertIsNone(speak("I need water"))
-        self.assertIsNone(send_alert("person_nurse", "2026-10-24T02:15:00Z"))
+        self.assertIsNone(speak("need_water", "I need water"))
+        self.assertIsNone(
+            send_alert("nurse_call", "person_nurse", "2026-10-24T02:15:00Z")
+        )
+        self.assertIsNone(send_alert("no_activity", None, "2026-10-24T02:20:00Z"))
+
+    def test_alert_rejects_a_phrase_on_no_activity(self) -> None:
+        with self.assertRaises(ValueError):
+            send_alert("no_activity", "person_nurse", "2026-10-24T02:20:00Z")
 
 
 class LogTests(unittest.TestCase):
@@ -85,11 +95,54 @@ class LogTests(unittest.TestCase):
             self.assertEqual(row_id, 1)
             self.assertTrue(db_path.exists())
 
+    def test_save_selection_accepts_fixed_and_stores_alert_kind(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "taptotalk.db"
+            save_selection("person_nurse", "people", "fixed", db_path=db_path)
+            connection = connect(db_path)
+            try:
+                columns = {
+                    row[1] for row in connection.execute("PRAGMA table_info(alerts)")
+                }
+            finally:
+                connection.close()
+            self.assertIn("kind", columns)
+
     def test_save_selection_rejects_bad_source(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             db_path = Path(directory) / "taptotalk.db"
             with self.assertRaises(ValueError):
                 save_selection("need_water", "needs", "sensor", db_path=db_path)
+
+
+class ProfileTests(unittest.TestCase):
+    def test_default_profile_and_commands(self) -> None:
+        profile = load_profile()
+        self.assertEqual(profile["profile_id"], "bed-1")
+        self.assertEqual(profile["hold_ms"], 1000)
+        self.assertEqual(profile["fixed_buttons"][-1], "person_nurse")
+        self.assertEqual(cfg_hold_ms(profile["hold_ms"]), "CFG hold_ms 1000")
+        self.assertIn("LED phrase", LED_COMMANDS)
+
+    def test_language_paths_keep_english_ids(self) -> None:
+        self.assertEqual(phrases_path("en").name, "phrases.json")
+        self.assertEqual(phrases_path("es").name, "phrases.es.json")
+        english = load_phrases()
+        translated = {
+            "categories": english["categories"],
+            "phrases": [
+                {**item, "text": item["text"] + " (es)"} for item in english["phrases"]
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "phrases.es.json"
+            path.write_text(json.dumps(translated), encoding="utf-8")
+            loaded = load_phrases(path)
+            self.assertEqual(
+                [item["id"] for item in loaded["phrases"]],
+                [item["id"] for item in english["phrases"]],
+            )
+            self.assertNotEqual(loaded["phrases"][0]["text"], "I need water")
 
 
 if __name__ == "__main__":
