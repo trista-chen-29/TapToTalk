@@ -1,4 +1,4 @@
-"""Load the locked phrase catalog. CONTRACT.md section 4."""
+"""Load the locked phrase catalog. CONTRACT.md section 6."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ CALL_NURSE_ID = "person_nurse"
 CALL_NURSE_TEXT = "Call nurse"
 PHRASES_PATH = Path(__file__).with_name("phrases.json")
 _PHRASE_ID = re.compile(r"^[a-z][a-z0-9_]*$")
+_LANGUAGE = re.compile(r"^[a-z]{2,8}$")
 
 
 class Phrase(TypedDict):
@@ -25,9 +26,18 @@ class Catalog(TypedDict):
     phrases: list[Phrase]
 
 
-def load_phrases(path: Path | None = None) -> Catalog:
-    """Return the phrase catalog. List order is the fixed fallback order."""
-    catalog_path = path or PHRASES_PATH
+def phrases_path(language: str = "en") -> Path:
+    """English stays in phrases.json. Other languages use phrases.<language>.json."""
+    if language == "en":
+        return PHRASES_PATH
+    if _LANGUAGE.fullmatch(language) is None:
+        raise ValueError("language must be a short lowercase code such as en")
+    return PHRASES_PATH.with_name(f"phrases.{language}.json")
+
+
+def load_phrases(path: Path | None = None, *, language: str = "en") -> Catalog:
+    """Return the phrase catalog. English list order is the fixed fallback order."""
+    catalog_path = path if path is not None else phrases_path(language)
     raw = json.loads(catalog_path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError("phrase catalog must be a JSON object")
@@ -64,7 +74,15 @@ def load_phrases(path: Path | None = None) -> Catalog:
         raise ValueError("each category must contain exactly 4 phrases")
 
     nurse = next(item for item in normalized if item["id"] == CALL_NURSE_ID)
-    if nurse["text"] != CALL_NURSE_TEXT or nurse["category"] != "people":
+    if nurse["category"] != "people":
+        raise ValueError("person_nurse must stay in the people category")
+    if catalog_path.name == "phrases.json" and nurse["text"] != CALL_NURSE_TEXT:
         raise ValueError("person_nurse must be the people phrase 'Call nurse'")
+    if catalog_path.name != "phrases.json":
+        english_ids = [item["id"] for item in load_phrases()["phrases"]]
+        if [item["id"] for item in normalized] != english_ids:
+            raise ValueError(
+                "a language file must keep the English phrase ids in order"
+            )
 
     return {"categories": list(CATEGORIES), "phrases": normalized}

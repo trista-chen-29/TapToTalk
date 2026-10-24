@@ -1,4 +1,4 @@
-"""SQLite request log. Schema: CONTRACT.md section 9.
+"""SQLite request log. Schema: CONTRACT.md section 11.
 
 Person 2 owns storage behavior. This file lives in bridge/ because the
 team plan puts the log next to the state machine. Agree changes here
@@ -14,7 +14,7 @@ from pathlib import Path
 from bridge.phrases import load_phrases
 
 DB_PATH = Path(__file__).with_name("taptotalk.db")
-SOURCES = frozenset({"tap", "keyboard", "ui"})
+SOURCES = frozenset({"tap", "keyboard", "ui", "fixed"})
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS selections (
@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS selections (
 );
 CREATE TABLE IF NOT EXISTS alerts (
     id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
     created_at TEXT NOT NULL,
     escalated INTEGER NOT NULL DEFAULT 0,
     acknowledged INTEGER NOT NULL DEFAULT 0
@@ -57,8 +58,7 @@ def save_selection(
 ) -> int:
     """Insert one selections row and return its id.
 
-    Alert rows are a separate, still-open lifecycle. This function does not
-    write them.
+    Alert rows use the alerts table and are not written here.
     """
     catalog = load_phrases()
     known = {item["id"]: item["category"] for item in catalog["phrases"]}
@@ -67,7 +67,7 @@ def save_selection(
     if known[phrase_id] != category:
         raise ValueError(f"category does not match phrase_id: {phrase_id}")
     if source not in SOURCES:
-        raise ValueError("source must be tap, keyboard, or ui")
+        raise ValueError("source must be tap, keyboard, ui, or fixed")
 
     when = utc_now() if selected_at is None else selected_at
     connection = connect(db_path)
