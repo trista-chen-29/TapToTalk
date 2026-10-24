@@ -7,6 +7,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ai.alert import send_alert
 from ai.hello import echo
@@ -86,7 +87,11 @@ class StubTests(unittest.TestCase):
         previous = os.environ.get("CARTESIA_API_KEY")
         os.environ["CARTESIA_API_KEY"] = ""
         try:
-            self.assertIsNone(speak("need_water", "I need water"))
+            with (
+                patch("ai.speak._play_wav"),
+                patch("ai.speak._load_api_key", return_value=None),
+            ):
+                self.assertIsNone(speak("need_water", "I need water"))
         finally:
             if previous is None:
                 os.environ.pop("CARTESIA_API_KEY", None)

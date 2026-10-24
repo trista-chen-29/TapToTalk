@@ -1,0 +1,133 @@
+"""Local-first speech routing with synthetic catalog IDs and mocked playback."""
+
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from ai.speak import speak
+
+
+class LocalSpeakTests(unittest.TestCase):
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.audio_dir = Path(directory.name)
+        self.profile = {"audio_on": True, "output": "both", "language": "en"}
+        catalog = {"phrases": [{"id": "synthetic_phrase", "text": "Synthetic phrase"}]}
+        for target, value in (
+            ("_AUDIO_DIR", self.audio_dir),
+            ("load_profile", self.profile),
+            ("load_phrases", catalog),
+        ):
+            patcher = patch(
+                f"ai.speak.{target}",
+                **(
+                    {"return_value": value}
+                    if target != "_AUDIO_DIR"
+                    else {"new": value}
+                ),
+            )
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.clip = self.audio_dir / "synthetic_phrase.wav"
+
+    def test_local_clip_plays_without_key_or_network(self) -> None:
+        self.clip.write_bytes(b"synthetic-audio")
+        with (
+            patch("ai.speak._play_wav") as play,
+            patch("ai.speak._load_api_key", side_effect=AssertionError("key accessed")),
+            patch("ai.speak._synthesize", side_effect=AssertionError("network called")),
+        ):
+            self.assertIsNone(speak("synthetic_phrase", "Synthetic phrase"))
+        play.assert_called_once_with(b"synthetic-audio")
+
+    def test_missing_clip_uses_existing_live_fallback(self) -> None:
+        with (
+            patch("ai.speak._load_api_key", return_value="synthetic-key"),
+            patch("ai.speak._synthesize", return_value=b"live-audio") as synth,
+            patch("ai.speak._play_wav") as play,
+        ):
+            speak("synthetic_phrase", "Synthetic phrase")
+        synth.assert_called_once_with("synthetic-key", "Synthetic phrase")
+        play.assert_called_once_with(b"live-audio")
+
+    def test_failed_local_playback_uses_live_fallback(self) -> None:
+        self.clip.write_bytes(b"broken-clip")
+        with (
+            patch("ai.speak._load_api_key", return_value="synthetic-key"),
+            patch("ai.speak._synthesize", return_value=b"live-audio") as synth,
+            patch(
+                "ai.speak._play_wav", side_effect=[RuntimeError("bad clip"), None]
+            ) as play,
+        ):
+            speak("synthetic_phrase", "Synthetic phrase")
+        synth.assert_called_once()
+        self.assertEqual(play.call_count, 2)
+
+    def test_both_playback_paths_failing_return_without_error(self) -> None:
+        self.clip.write_bytes(b"broken-clip")
+        with (
+            patch("ai.speak._load_api_key", return_value="synthetic-key"),
+            patch("ai.speak._synthesize", return_value=b"live-audio"),
+            patch("ai.speak._play_wav", side_effect=RuntimeError("no output device")),
+        ):
+            self.assertIsNone(speak("synthetic_phrase", "Synthetic phrase"))
+
+    def test_failed_clip_without_key_returns_for_text_fallback(self) -> None:
+        self.clip.write_bytes(b"broken-clip")
+        with (
+            patch("ai.speak._play_wav", side_effect=RuntimeError("bad clip")),
+            patch("ai.speak._load_api_key", return_value=None),
+            patch("ai.speak._synthesize") as synth,
+        ):
+            self.assertIsNone(speak("synthetic_phrase", "Synthetic phrase"))
+        synth.assert_not_called()
+
+    def test_unknown_and_path_traversal_ids_never_play_or_call_network(self) -> None:
+        with (
+            patch("ai.speak._play_wav") as play,
+            patch("ai.speak._load_api_key") as key,
+        ):
+            for phrase_id in ("unknown_phrase", "../synthetic_phrase", "/tmp/clip", ""):
+                speak(phrase_id, "Synthetic phrase")
+        play.assert_not_called()
+        key.assert_not_called()
+
+    def test_symlink_outside_audio_directory_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            outside = Path(directory) / "clip.wav"
+            outside.write_bytes(b"outside")
+            self.clip.symlink_to(outside)
+            with (
+                patch("ai.speak._play_wav") as play,
+                patch("ai.speak._load_api_key") as key,
+            ):
+                speak("synthetic_phrase", "Synthetic phrase")
+            play.assert_not_called()
+            key.assert_not_called()
+
+    def test_audio_off_and_screen_only_make_no_audio_or_network_calls(self) -> None:
+        self.clip.write_bytes(b"synthetic-audio")
+        with (
+            patch("ai.speak._play_wav") as play,
+            patch("ai.speak._load_api_key") as key,
+        ):
+            self.profile["audio_on"] = False
+            speak("synthetic_phrase", "Synthetic phrase")
+            self.profile.update(audio_on=True, output="screen")
+            speak("synthetic_phrase", "Synthetic phrase")
+        play.assert_not_called()
+        key.assert_not_called()
+
+    def test_other_language_never_plays_english_cached_clip(self) -> None:
+        self.clip.write_bytes(b"english-audio")
+        self.profile["language"] = "es"
+        with (
+            patch("ai.speak._load_api_key", return_value=None),
+            patch("ai.speak._play_wav") as play,
+        ):
+            speak("synthetic_phrase", "Synthetic phrase")
+        play.assert_not_called()

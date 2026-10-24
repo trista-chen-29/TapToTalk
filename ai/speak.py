@@ -1,7 +1,7 @@
 """Speech. CONTRACT.md section 9.
 
-This pass calls Cartesia and plays the returned audio. A missing key or a
-failed call returns without raising, so on-screen text can stand in.
+Play a catalog clip first, then fall back to Cartesia. Missing keys and audio
+failures return without raising, so the bridge can keep text on screen.
 
 Model and voice come from Cartesia's Sonic 3.6 docs
 (https://docs.cartesia.ai/build-with-cartesia/tts-models/latest):
@@ -20,22 +20,63 @@ from pathlib import Path
 import miniaudio
 from dotenv import load_dotenv
 
+from bridge.phrases import load_phrases
+from bridge.profile import load_profile
+
 # Sonic 3.6 is the current stable model id. Skylar is a documented en-US voice.
 MODEL_ID = "sonic-3.6"
 VOICE_ID = "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4"
 _REQUEST_TIMEOUT_SECONDS = 15.0
+_AUDIO_DIR = Path(__file__).resolve().parents[1] / "bridge" / "audio"
 _ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 _SECRET_RE = re.compile(r"sk_car_[A-Za-z0-9_-]+")
 _BEARER_RE = re.compile(r"Bearer\s+\S+", re.IGNORECASE)
 
 
 def speak(phrase_id: str, text: str) -> None:
-    """Speak one catalog phrase through Cartesia. Failures stay quiet."""
+    """Play a local catalog clip first; use Cartesia only as a fallback.
+
+    This synchronous helper must run off the bridge event loop. The bridge
+    remains responsible for selection confirmation and on-screen feedback.
+    """
     if not isinstance(phrase_id, str) or not isinstance(text, str):
         raise TypeError("phrase_id and text must be strings")
     if phrase_id == "" or text == "":
         print("Cartesia speech skipped: phrase_id and text must be non-empty")
         return
+
+    try:
+        profile = load_profile()
+        catalog = load_phrases(language=profile["language"])
+        known_ids = {phrase["id"] for phrase in catalog["phrases"]}
+        if (
+            re.fullmatch(r"[a-z][a-z0-9_]*", phrase_id) is None
+            or phrase_id not in known_ids
+        ):
+            print("Speech skipped: unknown phrase id")
+            return
+        if not profile["audio_on"] or profile["output"] == "screen":
+            return
+        # Current clip naming is English-only. Never play an English cached
+        # recording for a different language profile.
+        root = _AUDIO_DIR.resolve()
+        clip = (root / f"{phrase_id}.wav").resolve()
+        if root not in clip.parents:
+            print("Speech skipped: clip path is outside the audio directory")
+            return
+    except Exception:
+        print("Speech skipped: catalog or profile is unavailable")
+        return
+
+    if profile["language"] == "en":
+        try:
+            if clip.is_file():
+                _play_wav(clip.read_bytes())
+                print("Played local audio.")
+                return
+        except Exception:
+            # Do not expose arbitrary decoder/device errors or credentials.
+            print("Local clip unavailable; trying speech fallback.")
 
     api_key = _load_api_key()
     if api_key is None:

@@ -6,12 +6,22 @@ import io
 import os
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import patch
 
 from ai.speak import speak
 
 
 class SpeakFailureTests(unittest.TestCase):
+    def setUp(self) -> None:
+        import tempfile
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        patcher = patch("ai.speak._AUDIO_DIR", Path(directory.name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_missing_key_prints_and_returns(self) -> None:
         previous = os.environ.get("CARTESIA_API_KEY")
         os.environ["CARTESIA_API_KEY"] = ""
