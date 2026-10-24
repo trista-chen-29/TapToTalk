@@ -58,6 +58,19 @@ def _load_api_key() -> str | None:
     return key or None
 
 
+def synthesize(text: str) -> bytes:
+    """Return a WAV clip for catalog text. Sends that text and nothing else."""
+    if not isinstance(text, str) or text == "":
+        raise ValueError("text must be a non-empty string")
+    api_key = _load_api_key()
+    if api_key is None:
+        raise RuntimeError("CARTESIA_API_KEY is not set")
+    try:
+        return _synthesize(api_key, text)
+    except Exception as exc:
+        raise RuntimeError(_public_reason(exc, api_key)) from None
+
+
 def _synthesize(api_key: str, text: str) -> bytes:
     """Request one WAV clip. The phrase id is not sent."""
     from cartesia import Cartesia
