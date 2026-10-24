@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -70,7 +71,15 @@ class StubTests(unittest.TestCase):
             rank_phrases({"candidates": ["need_water", 1]})
 
     def test_speak_and_alert_are_quiet(self) -> None:
-        self.assertIsNone(speak("need_water", "I need water"))
+        previous = os.environ.get("CARTESIA_API_KEY")
+        os.environ["CARTESIA_API_KEY"] = ""
+        try:
+            self.assertIsNone(speak("need_water", "I need water"))
+        finally:
+            if previous is None:
+                os.environ.pop("CARTESIA_API_KEY", None)
+            else:
+                os.environ["CARTESIA_API_KEY"] = previous
         self.assertIsNone(
             send_alert("nurse_call", "person_nurse", "2026-10-24T02:15:00Z")
         )
