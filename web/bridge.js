@@ -69,6 +69,15 @@ for (const [id, label] of categories) {
   tile.className = "tile";
   tile.dataset.category = id;
   tile.textContent = label;
+  // Decorative SVG only; category order, IDs and bridge selection stay unchanged.
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("viewBox", "0 0 32 32");
+  icon.setAttribute("aria-hidden", "true");
+  icon.setAttribute("focusable", "false");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#icon-${id}`);
+  icon.append(use);
+  tile.prepend(icon);
   categoryGrid.append(tile);
 }
 
@@ -143,6 +152,7 @@ function connect() {
     connected = true;
     clearSelection();
     updateSpeak();
+    status.setAttribute("data-connection", "connected");
     status.textContent = "Connected to bridge";
     message.textContent = "Waiting for bridge state.";
   });
@@ -158,6 +168,7 @@ function connect() {
   socket.addEventListener("error", () => {
     connected = false;
     updateSpeak();
+    status.setAttribute("data-connection", "disconnected");
     status.textContent = "Bridge connection unavailable";
   });
   socket.addEventListener("close", () => {
@@ -168,6 +179,7 @@ function connect() {
     pendingSnapshot = null;
     clearSelection();
     mode.textContent = "Mode: unavailable";
+    status.setAttribute("data-connection", "disconnected");
     status.textContent = "Bridge disconnected — reconnecting…";
     message.textContent = "Waiting for the bridge to reconnect.";
     window.setTimeout(connect, 2000);

@@ -3,26 +3,49 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
     <title>TapToTalk</title>
-    <link rel="stylesheet" href="styles.css" />
-    <script src="bridge.js" defer></script>
+    <link rel="stylesheet" href="styles.css?v=2" />
+    <script src="bridge.js?v=2" defer></script>
   </head>
-  <body>
-    <main class="screen">
-      <p class="eyebrow">Communication aid</p>
-      <h1>TapToTalk</h1>
-      <p class="status" id="connection-status" role="status">Connecting to bridge…</p>
-      <p class="mode" id="current-mode" aria-live="polite">Mode: unavailable</p>
-      <h2>Categories</h2>
-      <ul class="grid" id="category-grid" aria-label="Phrase categories"></ul>
-      <h2 id="phrase-heading">Phrases</h2>
-      <ul class="grid" id="phrase-grid" aria-labelledby="phrase-heading"></ul>
-      <button class="speak-button" id="speak-button" type="button" disabled aria-describedby="send-status">Speak</button>
-      <p class="note" id="send-status" role="status">Highlight a phrase using the bridge to enable Speak.</p>
-      <p class="note">Phrases appear when the bridge opens a category. Use Tab and Enter or Space to activate a phrase button.</p>
-      <p class="note" id="bridge-message" aria-live="polite">Waiting for a test message from the bridge.</p>
-      <p class="note">Bridge navigation and selection processing are not connected yet.</p>
-      <p class="nav"><a href="dashboard.html">Nurse requests</a></p>
+  <body class="patient-page">
+    <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <symbol id="icon-needs" viewBox="0 0 32 32"><path d="M16 3S6 14 6 21a10 10 0 0 0 20 0C26 14 16 3 16 3Z"/><path d="M11 21a5 5 0 0 0 5 5"/></symbol>
+      <symbol id="icon-pain_comfort" viewBox="0 0 32 32"><path d="m16 28-11-11C-3 7 10-1 16 9c6-10 19-2 11 8Z"/><path d="M7 17h6l3-6 3 12 3-6h5"/></symbol>
+      <symbol id="icon-people" viewBox="0 0 32 32"><circle cx="12" cy="10" r="5"/><path d="M2 28v-4a10 10 0 0 1 20 0v4M23 5a5 5 0 0 1 0 10M26 19a8 8 0 0 1 4 7v2"/></symbol>
+      <symbol id="icon-yes_no" viewBox="0 0 32 32"><path d="m3 10 5 5L18 4M20 20l9 9m0-9-9 9"/></symbol>
+    </svg>
+    <main class="screen patient-screen">
+      <div class="patient-scroll">
+        <header class="page-header">
+          <div><p class="eyebrow">Communication aid</p><h1>TapToTalk<span class="wordmark-dot" aria-hidden="true">.</span></h1></div>
+          <div class="status-bar" aria-label="Bridge status">
+            <p class="status" id="connection-status" role="status">Connecting to bridge…</p>
+            <p class="mode" id="current-mode" aria-live="polite">Mode: unavailable</p>
+          </div>
+        </header>
+        <section aria-labelledby="category-heading">
+          <div class="section-heading"><h2 id="category-heading">Categories</h2><span class="section-hint">Highlighted by the bridge</span></div>
+          <ul class="grid" id="category-grid" aria-label="Phrase categories"></ul>
+        </section>
+        <section class="phrases-section" aria-labelledby="phrase-heading">
+          <h2 id="phrase-heading">Phrases</h2>
+          <ul class="grid" id="phrase-grid" aria-labelledby="phrase-heading"></ul>
+          <div class="phrases-empty"><p>Waiting for a category</p><p class="note">Phrases appear when the bridge opens a category.</p></div>
+        </section>
+        <p class="note keyboard-hint">Use Tab and Enter or Space to activate a phrase button.</p>
+      </div>
+      <div class="speak-panel">
+        <button class="speak-button" id="speak-button" type="button" disabled aria-describedby="send-status">Speak</button>
+        <p class="note" id="send-status" role="status">Highlight a phrase using the bridge to enable Speak.</p>
+        <footer class="patient-footer">
+          <details class="diagnostics"><summary>Diagnostics</summary>
+            <p class="note" id="bridge-message" aria-live="polite">Waiting for a test message from the bridge.</p>
+            <p class="note">Bridge keyboard/sensor navigation is available. Browser selections are not processed yet.</p>
+          </details>
+          <nav class="nav" aria-label="Other view"><a href="dashboard.html">Nurse requests <span aria-hidden="true">↗</span></a></nav>
+        </footer>
+      </div>
     </main>
   </body>
 </html>

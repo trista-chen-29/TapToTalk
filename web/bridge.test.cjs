@@ -17,6 +17,7 @@ function setup() {
       this.classList = { add: (s) => classes.add(s), remove: (s) => classes.delete(s), contains: (s) => classes.has(s) };
     }
     append(child) { this.children.push(child); }
+    prepend(child) { this.children.unshift(child); }
     replaceChildren() { this.children = []; }
     setAttribute(k, v) { this.attributes[k] = v; }
     removeAttribute(k) { delete this.attributes[k]; }
@@ -32,7 +33,7 @@ function setup() {
     send(s) { this.sent.push(JSON.parse(s)); }
   }
   vm.runInNewContext(script, {
-    document: { getElementById: id => elements[id], createElement: () => new Element() },
+    document: { getElementById: id => elements[id], createElement: () => new Element(), createElementNS: () => new Element() },
     WebSocket: Socket,
     window: { location: { host: 'localhost:8765' }, setTimeout: fn => timers.push(fn) },
   });
