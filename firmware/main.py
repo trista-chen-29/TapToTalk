@@ -42,7 +42,7 @@ POLL_MS = 5                   # how often the pins are read
 
 TOUCH_ACTIVE_LOW = False      # True if the touch sensor reads 0 when touched
 KEY_ACTIVE_LOW = True         # HW-483 key module reads 0 when pressed
-TOUCH_HOLDOVER_MS = 150       # smooths the metal touch sensor's flicker (set 0 for a TTP223)
+TOUCH_HOLDOVER_MS = 20        # bridges mains flicker; shorter than DEBOUNCE_MS so a spike is not a second tap (set 0 for a TTP223)
 HELD_HOLDOVER_MS = 500        # once HOLD is sent, a dropout shorter than this still counts as
                               # held, so a wobbly 3-second hold can reach HOLD_LONG
 
