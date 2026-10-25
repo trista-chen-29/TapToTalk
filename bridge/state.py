@@ -52,13 +52,20 @@ Effect = Selected | NurseCall | str
 
 
 class Machine:
-    """Category and phrase menu from the contract button table.
+    """Category menu, or a fixed button list, from the contract button table.
 
     Phrase mode opens in catalog order. ``reorder_open_phrases`` applies a
-    ranking only while the highlight is still the first phrase.
+    ranking only while the highlight is still the first phrase. Fixed button
+    mode keeps the profile order and never reorders it.
     """
 
-    def __init__(self, catalog: Catalog) -> None:
+    def __init__(
+        self,
+        catalog: Catalog,
+        *,
+        menu: str = "categories",
+        fixed_buttons: list[str] | None = None,
+    ) -> None:
         self._categories = list(catalog["categories"])
         self._phrases = [
             {
@@ -75,6 +82,9 @@ class Machine:
         self._heard_at: float | None = None
         self._led = "LED idle"
         self._led_until: float | None = None
+        self._menu = "categories"
+        self._fixed_buttons: list[str] = []
+        self.use_profile_menu(menu, list(fixed_buttons or []))
 
     def snapshot(self) -> State:
         """Current UI state in the section 7 shape."""
@@ -100,11 +110,11 @@ class Machine:
     def reorder_open_phrases(self, phrase_ids: list[str]) -> State | None:
         """Apply a new order of the phrases already on screen.
 
-        Returns None when the list must stay put: the menu is not in phrase
+        Returns None when the menu is fixed, the screen is not in phrase
         mode, the patient has moved the highlight, the ids differ, or the
         order is already the catalog order.
         """
-        if self._mode != "phrase" or self._highlight != 0:
+        if self._menu == "fixed" or self._mode != "phrase" or self._highlight != 0:
             return None
         current = [item["id"] for item in self._open]
         if phrase_ids == current or Counter(phrase_ids) != Counter(current):
@@ -120,6 +130,8 @@ class Machine:
 
         Unknown events leave the state as it is. A TAP in idle does the same.
         HOLD is the 1-second action. In idle it starts a session.
+        With menu "fixed", that session is the fixed button list: TAP and
+        SELECT choose the highlighted button, and HOLD only moves the highlight.
         HOLD_LONG is the separate 3-second event from the Pico, and it calls
         the nurse from every mode. A long press still emits HOLD first.
         """
@@ -130,6 +142,8 @@ class Machine:
         if self._mode == "idle":
             if event in {"TAP", "SELECT"}:
                 return self.snapshot(), []
+            if self._menu == "fixed":
+                return self._enter_fixed(now)
             return self._enter_category(now)
         if self._mode == "category":
             self._heard_at = now
@@ -139,10 +153,22 @@ class Machine:
                 return self.snapshot(), ["LED listening"]
             return self._enter_phrase(now)
         self._heard_at = now
+        if self._menu == "fixed":
+            if event == "HOLD":
+                self._advance(self._open)
+                return self.snapshot(), ["LED phrase"]
+            return self._choose(source, now)
         if event == "TAP":
             self._advance(self._open)
             return self.snapshot(), ["LED phrase"]
         return self._choose(source, now)
+
+    def use_profile_menu(self, menu: str, fixed_buttons: list[str]) -> None:
+        """Apply a profile menu while idle. An open session keeps its menu."""
+        if self._mode != "idle":
+            return
+        self._menu = "fixed" if menu == "fixed" else "categories"
+        self._fixed_buttons = list(fixed_buttons)
 
     def tick(self, now: float) -> tuple[State, list[Effect]]:
         """Return to idle after 8 quiet seconds, then clear a timed lamp."""
@@ -190,6 +216,25 @@ class Machine:
             if item["category"] == category
         ]
         self._highlight = 0
+        self._heard_at = now
+        self._led_until = None
+        self._led = "LED phrase"
+        return self.snapshot(), ["LED phrase"]
+
+    def _enter_fixed(self, now: float) -> tuple[State, list[Effect]]:
+        """Open the nurse-set buttons. There is no category step."""
+        by_id = {item["id"]: item["text"] for item in self._phrases}
+        opened: list[PhraseView] = [
+            {"id": phrase_id, "text": by_id[phrase_id]}
+            for phrase_id in self._fixed_buttons
+            if phrase_id in by_id
+        ]
+        if not opened:
+            return self.snapshot(), []
+        self._mode = "phrase"
+        self._highlight = 0
+        self._category = None
+        self._open = opened
         self._heard_at = now
         self._led_until = None
         self._led = "LED phrase"

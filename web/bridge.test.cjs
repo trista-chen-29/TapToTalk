@@ -234,6 +234,22 @@ test('direct phrase activation uses the same pending guard as Speak', () => {
   assert.equal(elements['speak-button'].disabled, true);
 });
 
+test('fixed phrases render with no category highlight', () => {
+  const { elements, state } = setup();
+  const phrases = ['yes_yes', 'pain_here', 'person_nurse'].map((id) =>
+    catalog.phrases.find((phrase) => phrase.id === id));
+  state('phrase', 1, null, phrases);
+  const buttons = elements['phrase-grid'].children.map((item) => item.children[0]);
+  assert.deepEqual(buttons.map((button) => button.dataset.phraseId), phrases.map((phrase) => phrase.id));
+  assert.deepEqual(buttons.map((button) => button.textContent), phrases.map((phrase) => phrase.text));
+  assert.deepEqual(buttons.map((button) => button.classList.contains('highlight')), [false, true, false]);
+  assert.equal(buttons[1].attributes['aria-current'], 'true');
+  assert.ok(elements['category-grid'].children.every((tile) => !tile.classList.contains('highlight')));
+  assert.equal(elements['phrase-heading'].textContent, 'Phrases');
+  assert.equal(elements['speak-button'].disabled, false);
+  assert.equal(elements['current-mode'].textContent, 'Mode: phrase');
+});
+
 test('socket error disables Speak before the close event', () => {
   const { elements, state, sockets } = setup();
   state('phrase', 0, 'needs', catalog.phrases.slice(0, 4));
