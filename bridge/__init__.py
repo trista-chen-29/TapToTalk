@@ -1,1 +1,1 @@
-"""Laptop bridge: phrase catalog, request log, and later the tap state machine."""
+"""Laptop bridge: phrase catalog, request log, and the tap state machine."""

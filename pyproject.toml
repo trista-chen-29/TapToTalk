@@ -9,6 +9,8 @@ dependencies = [
     "miniaudio>=1.71,<2",
     "python-dotenv>=1.2,<2",
     "cartesia>=4.2,<5",
+    "pyserial>=3.5,<4",
+    "pynput",
 ]
 
 [tool.ruff]
