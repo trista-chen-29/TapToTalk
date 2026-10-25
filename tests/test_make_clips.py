@@ -44,6 +44,26 @@ class ClipJobTests(unittest.TestCase):
         self.assertEqual(spoken["person_nurse"], "Llame a la enfermera")
         self.assertTrue(all(not clip_id.startswith("cat_") for clip_id in spoken))
 
+    def test_mandarin_and_russian_jobs_skip_english_category_names(self) -> None:
+        samples = {
+            "zh": ("我需要水", "请叫护士"),
+            "ru": ("Мне нужна вода", "Позовите медсестру"),
+        }
+        for language, (water, nurse) in samples.items():
+            with self.subTest(language=language):
+                catalog = json.loads(
+                    (PHRASES.parent / f"phrases.{language}.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                jobs = clip_jobs(catalog, language=language)
+                spoken = {job.clip_id: job.text for job in jobs}
+                self.assertEqual(spoken["need_water"], water)
+                self.assertEqual(spoken["person_nurse"], nurse)
+                self.assertTrue(
+                    all(not clip_id.startswith("cat_") for clip_id in spoken)
+                )
+
 
 class WriteClipTests(unittest.TestCase):
     def test_skips_existing_file_unless_force(self) -> None:
@@ -170,6 +190,34 @@ class SpanishClipCommandTests(unittest.TestCase):
         ):
             main(["--language", "fr"])
         self.assertIn("'fr'", str(raised.exception))
+
+    def test_mandarin_and_russian_commands_use_separate_directories(self) -> None:
+        samples = {
+            "zh": ("我需要水", "请叫护士"),
+            "ru": ("Мне нужна вода", "Позовите медсестру"),
+        }
+        for language, (water, nurse) in samples.items():
+            with self.subTest(language=language):
+                with (
+                    patch(
+                        "ai.make_clips.write_clips",
+                        return_value=ClipReport(0, 0, ()),
+                    ) as write,
+                    patch(
+                        "ai.make_clips.synthesize",
+                        side_effect=AssertionError("called"),
+                    ),
+                ):
+                    self.assertEqual(main(["--language", language]), 0)
+                jobs = write.call_args.args[0]
+                audio_dir = write.call_args.args[1]
+                self.assertEqual(audio_dir.name, language)
+                self.assertEqual(audio_dir.parent.name, "audio")
+                self.assertEqual(jobs[0].text, water)
+                self.assertEqual(jobs[8].text, nurse)
+                self.assertTrue(all(not job.clip_id.startswith("cat_") for job in jobs))
+                self.assertEqual(write.call_args.kwargs["language"], language)
+                self.assertFalse(audio_dir.exists())
 
 
 def _wav() -> bytes:

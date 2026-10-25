@@ -65,6 +65,30 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len(by_id), 16)
         self.assertEqual(english["phrases"][0]["text"], "I need water")
 
+    def test_mandarin_and_russian_catalogs_keep_english_ids(self) -> None:
+        english = load_phrases(language="en")
+        english_rows = [(item["id"], item["category"]) for item in english["phrases"]]
+        samples = {
+            "zh": ("我需要水", "请叫护士"),
+            "ru": ("Мне нужна вода", "Позовите медсестру"),
+        }
+        for language, (water, nurse_text) in samples.items():
+            with self.subTest(language=language):
+                catalog = load_phrases(language=language)
+                self.assertEqual(catalog["categories"], list(CATEGORIES))
+                rows = [(item["id"], item["category"]) for item in catalog["phrases"]]
+                self.assertEqual(rows, english_rows)
+                by_id = {item["id"]: item["text"] for item in catalog["phrases"]}
+                self.assertEqual(by_id["need_water"], water)
+                self.assertEqual(by_id["person_nurse"], nurse_text)
+                nurse = next(
+                    item for item in catalog["phrases"] if item["id"] == CALL_NURSE_ID
+                )
+                self.assertEqual(nurse["category"], "people")
+                self.assertNotIn("I need water", by_id.values())
+                self.assertEqual(len(by_id), 16)
+        self.assertEqual(english["phrases"][0]["text"], "I need water")
+
     def test_missing_language_fails_clearly(self) -> None:
         with self.assertRaises(FileNotFoundError) as raised:
             load_phrases(language="fr")
@@ -92,6 +116,27 @@ class CatalogTests(unittest.TestCase):
         _state, effects = machine.handle("HOLD_LONG", "key", 0.0)
         nurse = next(item for item in effects if isinstance(item, NurseCall))
         self.assertEqual(nurse.phrase_id, CALL_NURSE_ID)
+
+    def test_mandarin_and_russian_text_is_on_screen(self) -> None:
+        samples = {
+            "zh": ("我需要水", "我需要上厕所", "我需要吸痰", "请帮我换个姿势"),
+            "ru": (
+                "Мне нужна вода",
+                "Мне нужно в туалет",
+                "Мне нужно отсасывание",
+                "Пожалуйста, поменяйте моё положение",
+            ),
+        }
+        for language, texts in samples.items():
+            with self.subTest(language=language):
+                machine = Machine(load_phrases(language=language))
+                machine.handle("HOLD", "key", 0.0)
+                state, _effects = machine.handle("HOLD", "key", 1.0)
+                shown = [item["text"] for item in state["phrases"]]
+                self.assertEqual(shown, list(texts))
+                _state, effects = machine.handle("HOLD_LONG", "key", 2.0)
+                nurse = next(item for item in effects if isinstance(item, NurseCall))
+                self.assertEqual(nurse.phrase_id, CALL_NURSE_ID)
 
 
 class StubTests(unittest.TestCase):
@@ -190,6 +235,8 @@ class ProfileTests(unittest.TestCase):
     def test_language_paths_keep_english_ids(self) -> None:
         self.assertEqual(phrases_path("en").name, "phrases.json")
         self.assertEqual(phrases_path("es").name, "phrases.es.json")
+        self.assertEqual(phrases_path("zh").name, "phrases.zh.json")
+        self.assertEqual(phrases_path("ru").name, "phrases.ru.json")
         english = load_phrases()
         translated = {
             "categories": english["categories"],
@@ -220,6 +267,26 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(selected["language"], "es")
         spanish = load_phrases(language=selected["language"])
         self.assertEqual(spanish["phrases"][0]["text"], "Necesito agua")
+        self.assertEqual(
+            json.loads(PROFILE_PATH.read_text(encoding="utf-8"))["language"],
+            "en",
+        )
+
+    def test_saved_profile_stays_english_while_zh_and_ru_can_be_selected(self) -> None:
+        saved = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
+        samples = {"zh": "我需要水", "ru": "Мне нужна вода"}
+        self.assertEqual(saved["language"], "en")
+        for language, text in samples.items():
+            with self.subTest(language=language):
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "profile.json"
+                    chosen = dict(saved)
+                    chosen["language"] = language
+                    path.write_text(json.dumps(chosen), encoding="utf-8")
+                    selected = load_profile(path)
+                self.assertEqual(selected["language"], language)
+                catalog = load_phrases(language=selected["language"])
+                self.assertEqual(catalog["phrases"][0]["text"], text)
         self.assertEqual(
             json.loads(PROFILE_PATH.read_text(encoding="utf-8"))["language"],
             "en",

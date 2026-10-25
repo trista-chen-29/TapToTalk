@@ -51,8 +51,8 @@ def clip_jobs(catalog: dict[str, object], *, language: str = "en") -> list[ClipJ
     """Build phrase clips from the catalog, then English category clips.
 
     A non-English language keeps that catalog's phrase text and omits
-    category clips. Highlight names stay the English files, and a Spanish
-    profile stays silent instead of speaking them.
+    category clips. Highlight names stay the English files, and a
+    non-English profile stays silent instead of speaking them.
     """
     phrases = catalog.get("phrases")
     categories = catalog.get("categories")

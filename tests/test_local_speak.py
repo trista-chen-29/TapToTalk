@@ -272,3 +272,22 @@ class RealCatalogSpeechTests(unittest.TestCase):
         ):
             speak_category("needs")
         play.assert_not_called()
+
+    def test_mandarin_and_russian_skip_english_audio(self) -> None:
+        (self.audio_dir / "need_water.wav").write_bytes(b"english-water")
+        (self.audio_dir / "cat_needs.wav").write_bytes(b"english-needs")
+        samples = {"zh": "我需要水", "ru": "Мне нужна вода"}
+        for language, text in samples.items():
+            with self.subTest(language=language):
+                self.profile["language"] = language
+                with (
+                    patch("ai.speak._play_wav") as play,
+                    patch("ai.speak._load_api_key", return_value=None),
+                    patch(
+                        "ai.speak._synthesize", side_effect=AssertionError("network")
+                    ),
+                ):
+                    speak("need_water", text)
+                    speak("need_water", "I need water")
+                    speak_category("needs")
+                play.assert_not_called()
