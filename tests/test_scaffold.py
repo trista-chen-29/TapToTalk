@@ -12,10 +12,10 @@ from unittest.mock import patch
 from ai.hello import echo
 from ai.rank import rank_phrases
 from ai.speak import speak
-from bridge.commands import LED_COMMANDS, cfg_hold_ms
+from bridge.commands import LED_COMMANDS, cfg_hold_ms, cfg_touch_holdover_ms
 from bridge.log import connect, save_selection
 from bridge.phrases import CALL_NURSE_ID, CATEGORIES, load_phrases, phrases_path
-from bridge.profile import load_profile
+from bridge.profile import PROFILE_PATH, load_profile
 
 EXPECTED = (
     ("need_water", "I need water", "needs"),
@@ -137,9 +137,35 @@ class ProfileTests(unittest.TestCase):
         profile = load_profile()
         self.assertEqual(profile["profile_id"], "bed-1")
         self.assertEqual(profile["hold_ms"], 1000)
+        self.assertEqual(profile["touch_holdover_ms"], 150)
+        self.assertEqual(profile["audio_on"], True)
+        self.assertEqual(profile["menu"], "categories")
+        self.assertEqual(profile["language"], "en")
         self.assertEqual(profile["fixed_buttons"][-1], "person_nurse")
         self.assertEqual(cfg_hold_ms(profile["hold_ms"]), "CFG hold_ms 1000")
+        self.assertEqual(
+            cfg_touch_holdover_ms(profile["touch_holdover_ms"]),
+            "CFG touch_holdover_ms 150",
+        )
         self.assertIn("LED phrase", LED_COMMANDS)
+
+    def test_touch_holdover_stays_inside_20_to_400(self) -> None:
+        raw = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "profile.json"
+            raw["touch_holdover_ms"] = 20
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            self.assertEqual(load_profile(path)["touch_holdover_ms"], 20)
+            raw["touch_holdover_ms"] = 400
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            self.assertEqual(load_profile(path)["touch_holdover_ms"], 400)
+            for value in (19, 401, 0, True, "150"):
+                raw["touch_holdover_ms"] = value
+                path.write_text(json.dumps(raw), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    load_profile(path)
+        with self.assertRaises(ValueError):
+            cfg_touch_holdover_ms(19)
 
     def test_language_paths_keep_english_ids(self) -> None:
         self.assertEqual(phrases_path("en").name, "phrases.json")

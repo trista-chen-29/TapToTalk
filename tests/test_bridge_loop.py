@@ -81,6 +81,7 @@ class BridgeLoopTests(unittest.IsolatedAsyncioTestCase):
             self.serial.sent,
             [
                 "CFG hold_ms 1000",
+                "CFG touch_holdover_ms 150",
                 "LED listening",
                 "LED listening",
                 "LED phrase",
@@ -116,7 +117,10 @@ class BridgeLoopTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_connect_sends_hold_time_then_led(self) -> None:
         on_serial_connect(self.app)
-        self.assertEqual(self.serial.sent, ["CFG hold_ms 1000", "LED idle"])
+        self.assertEqual(
+            self.serial.sent,
+            ["CFG hold_ms 1000", "CFG touch_holdover_ms 150", "LED idle"],
+        )
 
     async def test_hold_long_alerts_the_dashboard_and_turns_the_lamp_red(self) -> None:
         async with self.client.ws_connect("/") as socket:
@@ -138,6 +142,7 @@ class BridgeLoopTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "profile.json"
             raw["hold_ms"] = 1500
+            raw["touch_holdover_ms"] = 80
             path.write_text(json.dumps(raw), encoding="utf-8")
             self.app[RUNTIME].profile_path = path
             async with self.client.ws_connect("/") as socket:
@@ -146,8 +151,10 @@ class BridgeLoopTests(unittest.IsolatedAsyncioTestCase):
                 state = await socket.receive_json(timeout=2)
                 self.assertEqual(state["mode"], "category")
                 self.assertEqual(self.serial.sent[0], "CFG hold_ms 1500")
+                self.assertEqual(self.serial.sent[1], "CFG touch_holdover_ms 80")
                 self.assertEqual(keys.hold_ms, 1500)
                 raw["hold_ms"] = 800
+                raw["touch_holdover_ms"] = 200
                 path.write_text(json.dumps(raw), encoding="utf-8")
                 self.app[RUNTIME].events.put_nowait(("RESET", "keyboard"))
                 idle = await socket.receive_json(timeout=2)
@@ -157,6 +164,7 @@ class BridgeLoopTests(unittest.IsolatedAsyncioTestCase):
                 state = await socket.receive_json(timeout=2)
         self.assertEqual(state["mode"], "category")
         self.assertEqual(self.serial.sent[0], "CFG hold_ms 800")
+        self.assertEqual(self.serial.sent[1], "CFG touch_holdover_ms 200")
         self.assertEqual(keys.hold_ms, 800)
 
     async def test_selected_effect_saves_once_and_speaks_once(self) -> None:

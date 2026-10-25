@@ -100,5 +100,45 @@ class FirmwareTests(unittest.TestCase):
         command("CFG hold_ms 3000")
         command("CFG hold_ms invalid")
         self.assertEqual(self.touch.hold_ms, 800)
+        self.assertEqual(self.touch.long_ms, 3000)
+        self.assertEqual(self.touch.holdover_ms, self.firmware["TOUCH_HOLDOVER_MS"])
+        command("CFG touch_holdover_ms 40")
+        self.assertEqual(self.touch.holdover_ms, 40)
+        self.assertEqual(self.touch.hold_ms, 800)
+        self.assertEqual(self.touch.long_ms, 3000)
+        command("CFG touch_holdover_ms 19")
+        command("CFG touch_holdover_ms 401")
+        command("CFG touch_holdover_ms invalid")
+        self.assertEqual(self.touch.holdover_ms, 40)
+        self.assertEqual(self.touch.long_ms, 3000)
         command("LED unknown")
         self.assertEqual([p.duty for p in self.firmware["channels"]], [0, 0, 65535])
+
+    def test_gap_longer_than_holdover_ends_the_press(self) -> None:
+        self.firmware["handle_command"]("CFG touch_holdover_ms 40")
+
+        def level(now: int) -> int:
+            if now < 100 or now >= 1600:
+                return 0
+            if 700 <= now < 780:
+                return 0
+            return int(now % 20 == 0)
+
+        self.sample_touch(2000, level)
+        self.assertEqual(self.events, ["TAP", "TAP"])
+
+    def test_gap_inside_default_holdover_stays_one_press(self) -> None:
+        def level(now: int) -> int:
+            if not (100 <= now < 1600):
+                return 0
+            if 700 <= now < 780:
+                return 0
+            return int(now % 20 == 0)
+
+        self.sample_touch(2200, level)
+        self.assertEqual(self.events, ["HOLD"])
+
+    def test_max_holdover_cannot_invent_a_hold(self) -> None:
+        self.firmware["handle_command"]("CFG touch_holdover_ms 400")
+        self.sample_touch(2000, lambda now: int(100 <= now < 300 and now % 20 == 0))
+        self.assertEqual(self.events, ["TAP"])

@@ -18,7 +18,7 @@ from aiohttp import WSMsgType, web
 
 from ai.rank import rank_phrases
 from ai.speak import speak, speak_category, stop_category_audio
-from bridge.commands import cfg_hold_ms
+from bridge.commands import cfg_hold_ms, cfg_touch_holdover_ms
 from bridge.keyboard import KeyboardLink
 from bridge.log import recent_phrase_ids, save_selection, utc_now
 from bridge.phrases import CALL_NURSE_ID, Catalog, Phrase, load_phrases
@@ -239,14 +239,14 @@ async def on_cleanup(app: web.Application) -> None:
 
 
 def on_serial_connect(app: web.Application) -> None:
-    """Send the profile hold time and the current lamp when the Pico opens."""
+    """Send the profile input settings and the current lamp when the Pico opens."""
     send_hold_config(app)
     runtime = app[RUNTIME]
     send_led(runtime, runtime.last_led, time.monotonic())
 
 
 def send_hold_config(app: web.Application) -> None:
-    """Send CFG hold_ms from the profile. An edit applies on the next session."""
+    """Send hold time and touch holdover. An edit applies on the next session."""
     runtime = app[RUNTIME]
     try:
         profile = load_profile(runtime.profile_path)
@@ -259,6 +259,7 @@ def send_hold_config(app: web.Application) -> None:
             runtime.keyboard.set_hold_ms(profile["hold_ms"])
     if runtime.serial is not None:
         runtime.serial.send(cfg_hold_ms(profile["hold_ms"]))
+        runtime.serial.send(cfg_touch_holdover_ms(profile["touch_holdover_ms"]))
 
 
 def send_led(runtime: Runtime, command: str, now: float) -> None:

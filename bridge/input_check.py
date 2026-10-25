@@ -11,7 +11,7 @@ import asyncio
 import logging
 from collections import Counter
 
-from bridge.commands import cfg_hold_ms
+from bridge.commands import cfg_hold_ms, cfg_touch_holdover_ms
 from bridge.keyboard import KeyboardLink
 from bridge.profile import load_profile
 from bridge.serial_link import SerialLink
@@ -30,6 +30,7 @@ async def check_input(seconds: int, source: str) -> None:
         print("Pico connected. Reading events from installed firmware.", flush=True)
         if link is not None:
             link.send(cfg_hold_ms(profile["hold_ms"]))
+            link.send(cfg_touch_holdover_ms(profile["touch_holdover_ms"]))
 
     try:
         if source in {"serial", "both"}:

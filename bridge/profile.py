@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 from typing import TypedDict
 
+from bridge.commands import TOUCH_HOLDOVER_MS_MAX, TOUCH_HOLDOVER_MS_MIN
 from bridge.phrases import load_phrases
 
 PROFILE_PATH = Path(__file__).with_name("profile.json")
@@ -27,6 +28,7 @@ class Profile(TypedDict):
     fixed_buttons: list[str]
     language: str
     hold_ms: int
+    touch_holdover_ms: int
     audio_on: bool
     idle_alert_minutes: int
 
@@ -57,10 +59,17 @@ def load_profile(path: Path | None = None) -> Profile:
         raise ValueError("language must be a string")
 
     hold_ms = raw.get("hold_ms")
+    touch_holdover_ms = raw.get("touch_holdover_ms")
     idle_alert_minutes = raw.get("idle_alert_minutes")
     audio_on = raw.get("audio_on")
     if isinstance(hold_ms, bool) or not isinstance(hold_ms, int) or hold_ms <= 0:
         raise ValueError("hold_ms must be a positive integer")
+    if (
+        isinstance(touch_holdover_ms, bool)
+        or not isinstance(touch_holdover_ms, int)
+        or not TOUCH_HOLDOVER_MS_MIN <= touch_holdover_ms <= TOUCH_HOLDOVER_MS_MAX
+    ):
+        raise ValueError("touch_holdover_ms must be an integer from 20 to 400")
     if (
         isinstance(idle_alert_minutes, bool)
         or not isinstance(idle_alert_minutes, int)
@@ -94,6 +103,7 @@ def load_profile(path: Path | None = None) -> Profile:
         "fixed_buttons": list(buttons),
         "language": language,
         "hold_ms": hold_ms,
+        "touch_holdover_ms": touch_holdover_ms,
         "audio_on": audio_on,
         "idle_alert_minutes": idle_alert_minutes,
     }

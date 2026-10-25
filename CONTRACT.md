@@ -1,6 +1,6 @@
 # CONTRACT.md: TapToTalk module interfaces
 
-Version: v1.6 (2026-10-25)
+Version: v1.7 (2026-10-25)
 
 Owners: firmware and bridge (Person 1), web and storage (Person 2), ai (Person 3).
 
@@ -8,6 +8,7 @@ This file is the source of truth for every message that crosses a module boundar
 
 ## Changelog
 
+- v1.7: added profile field `touch_holdover_ms` and `CFG touch_holdover_ms <n>` for tap sensitivity (FR16). Default 150 ms. The Pico accepts 20 to 400 ms. `CFG hold_ms` and the 3000 ms nurse hold are unchanged.
 - v1.6: the bridge plays `cat_<category>.wav` when the highlighted category changes (FR12). A missing clip stays silent. Category highlights never call Cartesia.
 - v1.5: the bridge calls `rank_phrases` when a category is highlighted (FR8). Catalog order stays on screen when ranking is not ready, fails, or the highlight has moved (FR9).
 - v1.4: removed the Fetch.ai agent. Nurse alerts are bridge logic in bridge/main.py, with no external service. The ai module covers only Claude and Cartesia.
@@ -44,6 +45,8 @@ Board: Raspberry Pi Pico, chosen 2026-10-23. The ESP32 is a backup only, if the 
 | `LED alert` | red | A nurse call or a no-activity alert was sent |
 
 `CFG hold_ms <n>` sets the hold time in milliseconds for the touch and key inputs. The bridge sends it at the start of each session, from the patient profile. Default `1000`. Example: `CFG hold_ms 1000`. The Pico ignores values outside 200 to 5000 ms, and values that are not below the 3000 ms `HOLD_LONG` time.
+
+`CFG touch_holdover_ms <n>` sets the touch holdover in milliseconds. A gap shorter than this still counts as the same touch. This is the per-patient tap sensitivity (FR16). The bridge sends it when the Pico connects and at the start of each session, from the patient profile, in the same places it sends `CFG hold_ms`. Default `150`. Example: `CFG touch_holdover_ms 150`. The Pico ignores values outside 20 to 400 ms. This command does not change `hold_ms` or the 3000 ms `HOLD_LONG` time.
 
 The Pico acknowledges nothing. The bridge re-sends the last command if the state has not changed for 5 seconds.
 
@@ -90,6 +93,7 @@ Module: `bridge/profile.json`. One file for the bed the device is on. The nurse 
   "fixed_buttons": ["yes_yes", "pain_here", "person_nurse"],
   "language": "en",
   "hold_ms": 1000,
+  "touch_holdover_ms": 150,
   "audio_on": true,
   "idle_alert_minutes": 10
 }
@@ -101,10 +105,10 @@ Rules:
 - `input` is `touch`, `key`, or `both`. `output` is `audio`, `screen`, or `both`.
 - `menu` is `categories` or `fixed`. With `fixed`, `fixed_buttons` lists 2 to 4 phrase ids, and each tap selects one button.
 - `language` picks the phrase file and audio clips (FR21).
-- `hold_ms`, `audio_on`, and `idle_alert_minutes` are starting defaults. Agree them at the table before the demo.
+- `hold_ms`, `touch_holdover_ms`, `audio_on`, and `idle_alert_minutes` are starting defaults. Agree them at the table before the demo.
+- `touch_holdover_ms` is the tap sensitivity in milliseconds: how long a brief gap in the touch still counts as the same press. Default `150`. The profile accepts 20 to 400 only.
 - Changes apply at the start of the next session.
 - Every profile keeps the nurse call working (see section 10).
-- The PRD names tap sensitivity. v1.1 has no profile field for it. Do not add one without a contract revision.
 
 ## 6. Phrase data and audio
 
