@@ -1,6 +1,6 @@
 # CONTRACT.md: TapToTalk module interfaces
 
-Version: v1.1 (2026-10-23)
+Version: v1.2 (2026-10-25)
 
 Owners: firmware and bridge (Person 1), web and storage (Person 2), ai (Person 3).
 
@@ -8,6 +8,7 @@ This file is the source of truth for every message that crosses a module boundar
 
 ## Changelog
 
+- v1.2: added the `HOLD_LONG` message for the 3-second direct nurse call (FR19), its keyboard key, and the key switch pull-up wiring note.
 - v1.1: added `LED phrase`, the `CFG hold_ms <n>` command, the patient profile file, audio clips, the no-activity alert, the mode-based button rules, and the direct nurse call.
 - v1.0: first contract.
 
@@ -21,11 +22,12 @@ Messages sent by the Pico:
 | --- | --- |
 | `TAP` | A short, debounced touch on the touch sensor (shorter than the hold time) |
 | `HOLD` | A touch held for at least the hold time (default 1000 ms) |
+| `HOLD_LONG` | The same touch still held at 3000 ms. Sent once, after `HOLD`. Fixed, `CFG hold_ms` does not change it |
 | `SELECT` | The key switch was pressed (backup input) |
 
 The Pico sends nothing else. The bridge logs and ignores unknown lines.
 
-Board: Raspberry Pi Pico, chosen 2026-10-23. The ESP32 is a backup only, if the Pico touch module fails. Touch input GP14, key switch GP15 with a 10k pull-down to GND, LED red GP16, LED green GP17, LED blue GP18. Put 220 ohm in series on each LED colour unless the module already has resistors. Confirm each pin against the module datasheet before wiring.
+Board: Raspberry Pi Pico, chosen 2026-10-23. The ESP32 is a backup only, if the Pico touch module fails. Touch input GP14, key switch GP15 with a 10k pull-down to GND (a module with its own resistor that reads 0 when pressed, such as the HW-483, uses the Pico's internal pull-up instead; the messages are the same), LED red GP16, LED green GP17, LED blue GP18. Put 220 ohm in series on each LED colour unless the module already has resistors. Confirm each pin against the module datasheet before wiring.
 
 ## 2. Bridge to Pico (commands)
 
@@ -37,7 +39,7 @@ Board: Raspberry Pi Pico, chosen 2026-10-23. The ESP32 is a backup only, if the 
 | `LED sent` | green | A phrase is being spoken |
 | `LED alert` | red | A nurse call or a no-activity alert was sent |
 
-`CFG hold_ms <n>` sets the hold time in milliseconds for the touch and key inputs. The bridge sends it at the start of each session, from the patient profile. Default `1000`. Example: `CFG hold_ms 1000`.
+`CFG hold_ms <n>` sets the hold time in milliseconds for the touch and key inputs. The bridge sends it at the start of each session, from the patient profile. Default `1000`. Example: `CFG hold_ms 1000`. The Pico ignores values outside 200 to 5000 ms, and values that are not below the 3000 ms `HOLD_LONG` time.
 
 The Pico acknowledges nothing. The bridge re-sends the last command if the state has not changed for 5 seconds.
 
@@ -51,6 +53,7 @@ The bridge maps keys to the same events as the sensor. A keyboard event goes thr
 | --- | --- |
 | Space | `TAP` |
 | Enter, held for the hold time | `HOLD` |
+| Enter, held for 3 seconds | `HOLD_LONG` |
 | Shift+Enter | `SELECT` |
 | Esc | Return to idle |
 
@@ -62,7 +65,7 @@ This table is the single source for the state machine. The bridge and the Pico b
 | --- | --- | --- | --- |
 | `TAP` | Enter category mode, highlight the first category | Highlight the next category | Highlight the next phrase |
 | `HOLD` (1 s) | Start a session (see the profile) | Open the phrases in the highlighted category | Choose the highlighted phrase |
-| `HOLD` (3 s) | Send Call nurse directly (FR19) | Same as idle | Same as idle |
+| `HOLD_LONG` (3 s) | Send Call nurse directly (FR19) | Same as idle | Same as idle |
 | `SELECT` | Ignored | Open the phrases, same as `HOLD` | Choose the highlighted phrase |
 
 - After 8 seconds with no input, the bridge returns to idle.
