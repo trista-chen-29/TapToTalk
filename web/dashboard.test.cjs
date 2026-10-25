@@ -7,6 +7,11 @@ const html = fs.readFileSync(path.join(__dirname, 'dashboard.html'), 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
 function setup() {
+  const clock = { now: Date.parse('2026-10-24T02:15:00Z') };
+  class TestDate extends Date {
+    constructor(...args) { super(...(args.length ? args : [clock.now])); }
+    static now() { return clock.now; }
+  }
   class Element {
     constructor() { this.children = []; this.attributes = {}; this.hidden = false; }
     append(...items) { this.children.push(...items); }
@@ -24,11 +29,12 @@ function setup() {
   vm.runInNewContext(script, {
     document: { getElementById: id => elements[id], createElement: () => new Element() },
     WebSocket: Socket,
+    Date: TestDate,
     window: { location: { host: 'localhost:8765' }, setTimeout: fn => timers.push(fn) },
   });
   const receive = data => sockets.at(-1).events.message({ data: JSON.stringify(data) });
   const alert = (kind = 'nurse_call', timestamp = '2026-10-24T02:15:00Z') => ({type: 'alert', kind, phrase_id: kind === 'nurse_call' ? 'person_nurse' : null, timestamp});
-  return { elements, sockets, timers, receive, alert };
+  return { elements, sockets, timers, receive, alert, clock };
 }
 
 test('connects to existing socket and ignores patient state', () => {
@@ -111,4 +117,23 @@ test('never renders arbitrary payload text or identifying extra fields', () => {
   assert.equal(row.children[0].textContent, 'Call nurse');
   assert.ok(!JSON.stringify(row).includes('SYNTHETIC-IGNORED'));
   assert.ok(!JSON.stringify(row).includes('unsafe'));
+});
+
+
+test('two-minute boundary documents blocked escalation without fabricating status', () => {
+  const { elements, receive, alert, clock, timers } = setup();
+  receive(alert('nurse_call', '2026-10-24T02:15:00Z'));
+  const raisedAt = clock.now;
+  const card = elements['alert-list'].children[0];
+  for (const elapsed of [119999, 120000, 120001]) {
+    clock.now = raisedAt + elapsed;
+    // Replaying the ONLY existing contract message is not an escalation update.
+    // There is no bridge timer or acknowledgement/escalation protocol to invoke.
+    receive(alert('nurse_call', '2026-10-24T02:15:00Z'));
+    assert.equal(elements['alert-list'].children.length, 1);
+    assert.equal(card.children[0].textContent, 'Call nurse');
+    assert.equal(card.children[2].textContent,
+      'Received in this tab. Acknowledgement status unavailable.');
+    assert.equal(timers.length, 0);
+  }
 });
