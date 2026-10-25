@@ -3,23 +3,32 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
     <title>TapToTalk nurse requests</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=2" />
   </head>
   <body>
     <main class="screen nurse-dashboard">
-      <p class="eyebrow">Communication aid</p>
-      <h1>Nurse requests</h1>
+      <header class="page-header">
+        <div><p class="eyebrow">Communication aid · TapToTalk</p><h1>Nurse requests</h1></div>
+        <p class="note status" id="dashboard-connection" role="status">Connecting to bridge…</p>
+      </header>
       <p class="banner">
-        Simulated channel. This is not a hospital nurse-call system or an emergency service.
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 30 28H2Z"/><path d="M16 12v7m0 4v1"/></svg>
+        <span>Simulated channel. This is not a hospital nurse-call system or an emergency service.</span>
       </p>
-      <p class="note" id="dashboard-connection" role="status">Connecting to bridge…</p>
-      <p class="note" id="alert-summary" role="status">0 alerts received in this tab.</p>
-      <p class="empty" id="alerts-empty">No alerts received in this tab.</p>
-      <ol class="alert-list" id="alert-list" aria-label="Received alerts"></ol>
-      <p class="note" id="dashboard-message" role="status">Waiting for alerts.</p>
-      <p class="note">This tab shows only alerts received while open. Reloading clears this view; missed alerts are not recovered. Acknowledgement and escalation updates are not connected.</p>
-      <p class="nav"><a href="index.html">Patient screen</a></p>
+      <section aria-labelledby="requests-heading">
+        <div class="section-heading"><h2 id="requests-heading">Received alerts</h2><p class="note counter" id="alert-summary" role="status">0 alerts received in this tab.</p></div>
+        <div class="empty" id="alerts-empty">
+          <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 23V13a9 9 0 0 1 18 0v10l3 3H4Zm6 6h6M16 1v3"/></svg>
+          <h3>No alerts received in this tab.</h3><p class="note">New requests will appear here while this view is open.</p>
+        </div>
+        <ol class="alert-list" id="alert-list" aria-label="Received alerts"></ol>
+      </section>
+      <!-- Announce each new alert through this dedicated region, not the whole list. -->
+      <p class="note" id="dashboard-message" role="status" aria-live="polite" aria-atomic="true">Waiting for alerts.</p>
+      <aside class="info-callout"><p class="note">This tab shows only alerts received while open. Reloading clears this view; missed alerts are not recovered. Acknowledgement and escalation updates are not connected.</p></aside>
+      <nav class="nav" aria-label="Other view"><a class="secondary-link" href="index.html"><span aria-hidden="true">←</span> Patient screen</a></nav>
     </main>
     <script>
       "use strict";
@@ -70,6 +79,7 @@
       function connectDashboard() {
         const socket = new WebSocket(`ws://${window.location.host}/`);
         socket.addEventListener("open", () => {
+          connection.setAttribute("data-connection", "connected");
           connection.textContent = "Connected to local bridge";
           feedback.textContent = "Listening for alerts. Earlier or missed alerts are not recovered.";
         });
@@ -81,9 +91,11 @@
           }
         });
         socket.addEventListener("error", () => {
+          connection.setAttribute("data-connection", "disconnected");
           connection.textContent = "Bridge unavailable — new alerts may be missed.";
         });
         socket.addEventListener("close", () => {
+          connection.setAttribute("data-connection", "disconnected");
           connection.textContent = "Disconnected — reconnecting. New alerts may be missed.";
           feedback.textContent = "Previously received alerts remain visible. Missed alerts are not recovered.";
           window.setTimeout(connectDashboard, 2000);
