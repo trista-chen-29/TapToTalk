@@ -207,3 +207,68 @@ class CategoryClipTests(unittest.TestCase):
             speak_category("pain_comfort")
         self.assertTrue(stops[0].is_set())
         self.assertFalse(stops[1].is_set())
+
+
+class RealCatalogSpeechTests(unittest.TestCase):
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.audio_dir = Path(directory.name)
+        self.profile = {"audio_on": True, "output": "both", "language": "en"}
+        for target, value in (
+            ("_AUDIO_DIR", self.audio_dir),
+            ("load_profile", self.profile),
+        ):
+            patcher = patch(
+                f"ai.speak.{target}",
+                **(
+                    {"return_value": value}
+                    if target != "_AUDIO_DIR"
+                    else {"new": value}
+                ),
+            )
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_english_profile_still_plays_its_wav(self) -> None:
+        (self.audio_dir / "need_water.wav").write_bytes(b"english-water")
+        with (
+            patch("ai.speak._play_wav") as play,
+            patch("ai.speak._load_api_key", side_effect=AssertionError("key")),
+            patch("ai.speak._synthesize", side_effect=AssertionError("network")),
+        ):
+            speak("need_water", "I need water")
+        play.assert_called_once_with(b"english-water")
+
+    def test_spanish_text_does_not_play_english_wav_or_call_cartesia(self) -> None:
+        (self.audio_dir / "need_water.wav").write_bytes(b"english-water")
+        self.profile["language"] = "es"
+        with (
+            patch("ai.speak._play_wav") as play,
+            patch("ai.speak._load_api_key", return_value=None),
+            patch("ai.speak._synthesize", side_effect=AssertionError("network")),
+        ):
+            speak("need_water", "Necesito agua")
+        play.assert_not_called()
+
+    def test_spanish_rejects_english_phrase_text(self) -> None:
+        (self.audio_dir / "need_water.wav").write_bytes(b"english-water")
+        self.profile["language"] = "es"
+        with (
+            patch("ai.speak._play_wav") as play,
+            patch("ai.speak._load_api_key", side_effect=AssertionError("key")),
+            patch("ai.speak._synthesize", side_effect=AssertionError("network")),
+        ):
+            speak("need_water", "I need water")
+        play.assert_not_called()
+
+    def test_spanish_category_highlight_stays_silent(self) -> None:
+        (self.audio_dir / "cat_needs.wav").write_bytes(b"english-needs")
+        self.profile["language"] = "es"
+        with (
+            patch("ai.speak._play_wav") as play,
+            patch("ai.speak._load_api_key", side_effect=AssertionError("key")),
+            patch("ai.speak._synthesize", side_effect=AssertionError("network")),
+        ):
+            speak_category("needs")
+        play.assert_not_called()

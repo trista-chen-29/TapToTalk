@@ -38,6 +38,10 @@ def phrases_path(language: str = "en") -> Path:
 def load_phrases(path: Path | None = None, *, language: str = "en") -> Catalog:
     """Return the phrase catalog. English list order is the fixed fallback order."""
     catalog_path = path if path is not None else phrases_path(language)
+    if not catalog_path.is_file():
+        if path is None:
+            raise FileNotFoundError(f"no phrase catalog for language {language!r}")
+        raise FileNotFoundError(f"phrase catalog not found: {catalog_path}")
     raw = json.loads(catalog_path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError("phrase catalog must be a JSON object")

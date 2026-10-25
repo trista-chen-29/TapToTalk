@@ -1,19 +1,21 @@
 """Write phrase and category clips into bridge/audio/.
 
-Reads bridge/phrases.json and speaks only the phrase text from that file,
-plus the spoken category names in CATEGORY_SPOKEN_NAMES. Person 1 owns
+English reads bridge/phrases.json and writes bridge/audio/. Another language
+reads bridge/phrases.<language>.json and writes bridge/audio/<language>/
+from that file's phrase text only. Category clips stay English, so a
+non-English run does not speak the English category names. Person 1 owns
 bridge/audio/. This script is the only writer.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from ai.speak import synthesize
+from bridge.phrases import load_phrases
 
 # Person 1 should confirm the names.
 CATEGORY_SPOKEN_NAMES = {
@@ -24,7 +26,6 @@ CATEGORY_SPOKEN_NAMES = {
 }
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_PHRASES_PATH = _REPO_ROOT / "bridge" / "phrases.json"
 _AUDIO_DIR = _REPO_ROOT / "bridge" / "audio"
 _SAFE_ID = re.compile(r"[a-z0-9_]+\Z")
 
@@ -46,8 +47,13 @@ class ClipReport:
     failed: tuple[str, ...]
 
 
-def clip_jobs(catalog: dict[str, object]) -> list[ClipJob]:
-    """Build phrase clips, then category clips, from the catalog only."""
+def clip_jobs(catalog: dict[str, object], *, language: str = "en") -> list[ClipJob]:
+    """Build phrase clips from the catalog, then English category clips.
+
+    A non-English language keeps that catalog's phrase text and omits
+    category clips. Highlight names stay the English files, and a Spanish
+    profile stays silent instead of speaking them.
+    """
     phrases = catalog.get("phrases")
     categories = catalog.get("categories")
     if not isinstance(phrases, list) or not isinstance(categories, list):
@@ -66,6 +72,8 @@ def clip_jobs(catalog: dict[str, object]) -> list[ClipJob]:
     for category in categories:
         if not isinstance(category, str):
             raise ValueError("each category must be a string")
+        if language != "en":
+            continue
         spoken = CATEGORY_SPOKEN_NAMES.get(category)
         if spoken is None:
             jobs.append(ClipJob(f"cat_{category}", ""))
@@ -79,6 +87,7 @@ def write_clips(
     audio_dir: Path,
     *,
     force: bool,
+    language: str = "en",
 ) -> ClipReport:
     """Write missing WAV files. An existing file is left in place unless force."""
     written = 0
@@ -102,7 +111,7 @@ def write_clips(
             print(f"failed {job.clip_id}: no spoken text")
             continue
         try:
-            audio = synthesize(job.text)
+            audio = synthesize(job.text, language=language)
             _write_wav(path, audio)
         except Exception as exc:
             failed.append(job.clip_id)
@@ -124,13 +133,37 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Replace a clip even when the WAV file already exists.",
     )
+    parser.add_argument(
+        "--language",
+        default="en",
+        help=(
+            "Catalog language. English writes bridge/audio/. "
+            "Other languages write bridge/audio/<language>/ from that "
+            "phrase file and skip category clips."
+        ),
+    )
     args = parser.parse_args(argv)
-    catalog = json.loads(_PHRASES_PATH.read_text(encoding="utf-8"))
-    report = write_clips(clip_jobs(catalog), _AUDIO_DIR, force=args.force)
+    catalog = load_phrases(language=args.language)
+    report = write_clips(
+        clip_jobs(catalog, language=args.language),
+        _audio_dir_for(args.language),
+        force=args.force,
+        language=args.language,
+    )
     print(f"written {report.written}")
     print(f"skipped {report.skipped}")
     print(f"failed {len(report.failed)}")
     return 1 if report.failed else 0
+
+
+def _audio_dir_for(language: str) -> Path:
+    """English clips stay in bridge/audio/. Other languages get a subdirectory."""
+    if language == "en":
+        return _AUDIO_DIR
+    audio_dir = (_AUDIO_DIR / language).resolve()
+    if _AUDIO_DIR.resolve() not in audio_dir.parents:
+        raise ValueError("audio directory escapes bridge/audio")
+    return audio_dir
 
 
 def _wav_path(audio_dir: Path, clip_id: str) -> Path:

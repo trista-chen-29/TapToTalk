@@ -15,7 +15,8 @@ from ai.speak import speak
 from bridge.commands import LED_COMMANDS, cfg_hold_ms
 from bridge.log import connect, save_selection
 from bridge.phrases import CALL_NURSE_ID, CATEGORIES, load_phrases, phrases_path
-from bridge.profile import load_profile
+from bridge.profile import PROFILE_PATH, load_profile
+from bridge.state import Machine, NurseCall
 
 EXPECTED = (
     ("need_water", "I need water", "needs"),
@@ -47,6 +48,50 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(tuple(rows), EXPECTED)
         nurse = next(item for item in catalog["phrases"] if item["id"] == CALL_NURSE_ID)
         self.assertEqual(nurse["text"], "Call nurse")
+
+    def test_spanish_catalog_keeps_english_ids(self) -> None:
+        english = load_phrases(language="en")
+        spanish = load_phrases(language="es")
+        self.assertEqual(spanish["categories"], list(CATEGORIES))
+        self.assertEqual(
+            [(item["id"], item["category"]) for item in spanish["phrases"]],
+            [(item["id"], item["category"]) for item in english["phrases"]],
+        )
+        by_id = {item["id"]: item["text"] for item in spanish["phrases"]}
+        self.assertEqual(by_id["person_nurse"], "Llame a la enfermera")
+        nurse = next(item for item in spanish["phrases"] if item["id"] == CALL_NURSE_ID)
+        self.assertEqual(nurse["category"], "people")
+        self.assertNotIn("I need water", by_id.values())
+        self.assertEqual(len(by_id), 16)
+        self.assertEqual(english["phrases"][0]["text"], "I need water")
+
+    def test_missing_language_fails_clearly(self) -> None:
+        with self.assertRaises(FileNotFoundError) as raised:
+            load_phrases(language="fr")
+        self.assertIn("'fr'", str(raised.exception))
+
+    def test_spanish_phrase_text_is_on_screen(self) -> None:
+        machine = Machine(load_phrases(language="es"))
+        machine.handle("HOLD", "key", 0.0)
+        state, _effects = machine.handle("HOLD", "key", 1.0)
+        self.assertEqual(state["mode"], "phrase")
+        self.assertEqual(state["category"], "needs")
+        shown = [(item["id"], item["text"]) for item in state["phrases"]]
+        self.assertEqual(
+            shown,
+            [
+                ("need_water", "Necesito agua"),
+                ("need_bathroom", "Necesito ir al baño"),
+                ("need_suction", "Necesito succión"),
+                ("need_position", "Por favor, cambie mi posición"),
+            ],
+        )
+
+    def test_spanish_catalog_still_calls_the_nurse(self) -> None:
+        machine = Machine(load_phrases(language="es"))
+        _state, effects = machine.handle("HOLD_LONG", "key", 0.0)
+        nurse = next(item for item in effects if isinstance(item, NurseCall))
+        self.assertEqual(nurse.phrase_id, CALL_NURSE_ID)
 
 
 class StubTests(unittest.TestCase):
@@ -136,6 +181,7 @@ class ProfileTests(unittest.TestCase):
     def test_default_profile_and_commands(self) -> None:
         profile = load_profile()
         self.assertEqual(profile["profile_id"], "bed-1")
+        self.assertEqual(profile["language"], "en")
         self.assertEqual(profile["hold_ms"], 1000)
         self.assertEqual(profile["fixed_buttons"][-1], "person_nurse")
         self.assertEqual(cfg_hold_ms(profile["hold_ms"]), "CFG hold_ms 1000")
@@ -160,6 +206,24 @@ class ProfileTests(unittest.TestCase):
                 [item["id"] for item in english["phrases"]],
             )
             self.assertNotEqual(loaded["phrases"][0]["text"], "I need water")
+
+    def test_saved_profile_stays_english_while_es_can_be_selected(self) -> None:
+        saved = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(saved["language"], "en")
+        self.assertEqual(load_profile()["language"], "en")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "profile.json"
+            chosen = dict(saved)
+            chosen["language"] = "es"
+            path.write_text(json.dumps(chosen), encoding="utf-8")
+            selected = load_profile(path)
+        self.assertEqual(selected["language"], "es")
+        spanish = load_phrases(language=selected["language"])
+        self.assertEqual(spanish["phrases"][0]["text"], "Necesito agua")
+        self.assertEqual(
+            json.loads(PROFILE_PATH.read_text(encoding="utf-8"))["language"],
+            "en",
+        )
 
 
 if __name__ == "__main__":

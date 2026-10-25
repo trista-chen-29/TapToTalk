@@ -1,0 +1,21 @@
+{
+  "categories": ["needs", "pain_comfort", "people", "yes_no"],
+  "phrases": [
+    {"id": "need_water", "text": "Necesito agua", "category": "needs"},
+    {"id": "need_bathroom", "text": "Necesito ir al baño", "category": "needs"},
+    {"id": "need_suction", "text": "Necesito succión", "category": "needs"},
+    {"id": "need_position", "text": "Por favor, cambie mi posición", "category": "needs"},
+    {"id": "pain_here", "text": "Tengo dolor", "category": "pain_comfort"},
+    {"id": "pain_medicine", "text": "Necesito medicina para el dolor", "category": "pain_comfort"},
+    {"id": "comfort_hot", "text": "Tengo mucho calor", "category": "pain_comfort"},
+    {"id": "comfort_cold", "text": "Tengo mucho frío", "category": "pain_comfort"},
+    {"id": "person_nurse", "text": "Llame a la enfermera", "category": "people"},
+    {"id": "person_family", "text": "Por favor, llame a mi familia", "category": "people"},
+    {"id": "person_doctor", "text": "Quiero ver al médico", "category": "people"},
+    {"id": "person_thanks", "text": "Gracias", "category": "people"},
+    {"id": "yes_yes", "text": "Sí", "category": "yes_no"},
+    {"id": "yes_no", "text": "No", "category": "yes_no"},
+    {"id": "yes_not_sure", "text": "No estoy seguro", "category": "yes_no"},
+    {"id": "yes_repeat", "text": "Por favor, dígalo otra vez", "category": "yes_no"}
+  ]
+}
