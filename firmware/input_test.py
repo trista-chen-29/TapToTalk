@@ -16,7 +16,7 @@ import time
 TOUCH_PIN = 14
 KEY_PIN = 15
 
-HOLD_MS = 800       # long press threshold; later this comes from profile.json via CFG hold_ms
+HOLD_MS = 1000       # long press threshold; later this comes from profile.json via CFG hold_ms
 DEBOUNCE_MS = 30    # ignore changes shorter than this
 POLL_MS = 5         # how often we read the pins
 
