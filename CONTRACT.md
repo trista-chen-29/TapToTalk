@@ -1,6 +1,6 @@
 # CONTRACT.md: TapToTalk module interfaces
 
-Version: v1.5 (2026-10-25)
+Version: v1.6 (2026-10-25)
 
 Owners: firmware and bridge (Person 1), web and storage (Person 2), ai (Person 3).
 
@@ -8,6 +8,7 @@ This file is the source of truth for every message that crosses a module boundar
 
 ## Changelog
 
+- v1.6: the bridge plays `cat_<category>.wav` when the highlighted category changes (FR12). A missing clip stays silent. Category highlights never call Cartesia.
 - v1.5: the bridge calls `rank_phrases` when a category is highlighted (FR8). Catalog order stays on screen when ranking is not ready, fails, or the highlight has moved (FR9).
 - v1.4: removed the Fetch.ai agent. Nurse alerts are bridge logic in bridge/main.py, with no external service. The ai module covers only Claude and Cartesia.
 - v1.3: a `TAP` in idle is ignored (FR20). A session still starts on `HOLD`.
@@ -218,9 +219,9 @@ Module: `ai/speak.py`, function `speak(phrase_id, text) -> None`.
 - If `audio_on` is true and `bridge/audio/<phrase id>.wav` exists, play the clip.
 - Otherwise, if the output is `audio` or `both`, call Cartesia with `text` and play the result. Use the clip cache where it exists.
 - Failure rule: if Cartesia fails, return without raising, and the bridge shows the text on screen. Never block the state machine on audio.
-- Highlight names are spoken with `cat_<category>.wav` when they exist. A highlight is never spoken from a live call during the menu, because that would add network delay to every tap.
+- Highlight names are spoken with `cat_<category>.wav` when the highlighted category changes. A missing clip, `audio_on` false, or screen-only output stays silent. A highlight is never spoken from a live call during the menu, because that would add network delay to every tap.
 
-The current stub returns without playing audio and without raising.
+Phrase speech plays a local clip when one exists, and otherwise calls Cartesia. A failure returns without raising, and the phrase text stays on screen.
 
 ## 10. Nurse alerts (bridge logic, no external service)
 

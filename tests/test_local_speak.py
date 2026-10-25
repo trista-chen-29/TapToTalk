@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ai.speak import speak
+from ai.speak import speak, speak_category
 
 
 class LocalSpeakTests(unittest.TestCase):
@@ -131,3 +131,79 @@ class LocalSpeakTests(unittest.TestCase):
         ):
             speak("synthetic_phrase", "Synthetic phrase")
         play.assert_not_called()
+
+
+class CategoryClipTests(unittest.TestCase):
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.audio_dir = Path(directory.name)
+        self.profile = {"audio_on": True, "output": "both", "language": "en"}
+        self.catalog = {
+            "categories": ["needs", "pain_comfort", "people", "yes_no"],
+            "phrases": [],
+        }
+        for target, value in (
+            ("_AUDIO_DIR", self.audio_dir),
+            ("load_profile", self.profile),
+            ("load_phrases", self.catalog),
+        ):
+            patcher = patch(
+                f"ai.speak.{target}",
+                **(
+                    {"return_value": value}
+                    if target != "_AUDIO_DIR"
+                    else {"new": value}
+                ),
+            )
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_category_clip_plays_without_a_live_call(self) -> None:
+        clip = self.audio_dir / "cat_needs.wav"
+        clip.write_bytes(b"needs-audio")
+        with (
+            patch("ai.speak._play_wav") as play,
+            patch("ai.speak._load_api_key", side_effect=AssertionError("key accessed")),
+            patch("ai.speak._synthesize", side_effect=AssertionError("network called")),
+        ):
+            self.assertIsNone(speak_category("needs"))
+        play.assert_called_once()
+        self.assertEqual(play.call_args.args[0], b"needs-audio")
+        self.assertIn("stop", play.call_args.kwargs)
+
+    def test_missing_category_clip_stays_silent(self) -> None:
+        with (
+            patch("ai.speak._play_wav") as play,
+            patch("ai.speak._load_api_key") as key,
+        ):
+            speak_category("pain_comfort")
+        play.assert_not_called()
+        key.assert_not_called()
+
+    def test_audio_off_and_other_language_skip_the_clip(self) -> None:
+        clip = self.audio_dir / "cat_needs.wav"
+        clip.write_bytes(b"needs-audio")
+        with patch("ai.speak._play_wav") as play:
+            self.profile["audio_on"] = False
+            speak_category("needs")
+            self.profile.update(audio_on=True, output="screen")
+            speak_category("needs")
+            self.profile.update(output="both", language="es")
+            speak_category("needs")
+            speak_category("not_a_category")
+        play.assert_not_called()
+
+    def test_a_new_highlight_stops_the_previous_clip(self) -> None:
+        for name in ("cat_needs.wav", "cat_pain_comfort.wav"):
+            (self.audio_dir / name).write_bytes(b"audio")
+        stops = []
+
+        def play(_audio: bytes, *, stop: object) -> None:
+            stops.append(stop)
+
+        with patch("ai.speak._play_wav", side_effect=play):
+            speak_category("needs")
+            speak_category("pain_comfort")
+        self.assertTrue(stops[0].is_set())
+        self.assertFalse(stops[1].is_set())

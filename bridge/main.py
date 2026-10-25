@@ -17,7 +17,7 @@ from typing import Protocol
 from aiohttp import WSMsgType, web
 
 from ai.rank import rank_phrases
-from ai.speak import speak
+from ai.speak import speak, speak_category, stop_category_audio
 from bridge.commands import cfg_hold_ms
 from bridge.keyboard import KeyboardLink
 from bridge.log import recent_phrase_ids, save_selection, utc_now
@@ -90,6 +90,8 @@ class Runtime:
     no_activity_sent: bool = False
     clock: Callable[[], float] = time.monotonic
     rank_phrases: Ranker | None = None
+    speak_category: Callable[[str], None] | None = None
+    category_epoch: int = 0
     rank_task: asyncio.Task[None] | None = None
     rank_result: RankResult | None = None
     phrase_epoch: int = 0
@@ -220,6 +222,7 @@ async def on_shutdown(app: web.Application) -> None:
 async def on_cleanup(app: web.Application) -> None:
     """Stop the tick loop and release the serial port."""
     runtime = app[RUNTIME]
+    stop_category_audio()
     rank_task = cancel_rank(runtime)
     if rank_task is not None:
         with contextlib.suppress(asyncio.CancelledError):
@@ -596,6 +599,51 @@ def apply_pending_rank(runtime: Runtime, previous: str, state: State) -> State:
     return ranked
 
 
+def follow_category_audio(app: web.Application, before: State, state: State) -> None:
+    """Play the saved category name when that highlight changes.
+
+    The clip runs off the event loop. Leaving the category menu drops a play
+    that has not started. A live voice call is never used for this.
+    """
+    runtime = app[RUNTIME]
+    player = runtime.speak_category
+    if player is None:
+        return
+    category = state["category"]
+    if state["mode"] == "category" and category is not None:
+        if before["mode"] == "category" and before["category"] == category:
+            return
+        runtime.category_epoch += 1
+        asyncio.create_task(
+            _play_category(app, player, category, runtime.category_epoch),
+            name="category-audio",
+        )
+        return
+    if before["mode"] == "category":
+        runtime.category_epoch += 1
+        stop_category_audio()
+
+
+async def _play_category(
+    app: web.Application,
+    player: Callable[[str], None],
+    category_id: str,
+    epoch: int,
+) -> None:
+    """Play one category clip unless the highlight has already moved on."""
+    runtime = app[RUNTIME]
+
+    def play_if_current() -> None:
+        if runtime.category_epoch != epoch:
+            return
+        player(category_id)
+
+    try:
+        await asyncio.to_thread(play_if_current)
+    except Exception:
+        logger.warning("category audio failed category=%s", category_id)
+
+
 def follow_rank(app: web.Application, before: State, state: State) -> None:
     """Start ranking for a newly highlighted category, or cancel it."""
     runtime = app[RUNTIME]
@@ -635,6 +683,7 @@ async def handle_item(
     state = apply_pending_rank(runtime, previous, state)
     await publish(app, state, effects, now)
     follow_rank(app, before, state)
+    follow_category_audio(app, before, state)
 
 
 async def publish_no_activity(app: web.Application, now: float) -> None:
@@ -704,6 +753,7 @@ def main() -> None:
     app = create_app()
     app[RUNTIME].inputs_enabled = True
     app[RUNTIME].rank_phrases = rank_phrases
+    app[RUNTIME].speak_category = speak_category
     print("Patient page: http://localhost:8765")
     print("WebSocket: ws://localhost:8765")
     web.run_app(app, host="localhost", port=8765)
