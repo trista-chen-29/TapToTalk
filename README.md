@@ -29,7 +29,7 @@ This is the Friday-night scaffold, aligned with contract v1.1:
 - Ranking returns the candidate ids unchanged. `speak(phrase_id, text)` and `send_alert(kind, phrase_id, timestamp)` return without calling out.
 
 The bridge serves the local pages and sends an initial state over WebSocket.
-The serial state machine, audio clips, Claude, Cartesia, and Fetch.ai are the next work for the module owners. Requirement IDs FR12 through FR21 are recorded in the contract and are not built yet.
+Claude ranking is still unwired. Requirement IDs FR12 through FR21 are recorded in the contract and are not built yet.
 
 ## Run the local bridge
 

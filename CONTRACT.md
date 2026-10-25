@@ -1,6 +1,6 @@
 # CONTRACT.md: TapToTalk module interfaces
 
-Version: v1.3 (2026-10-25)
+Version: v1.4 (2026-10-25)
 
 Owners: firmware and bridge (Person 1), web and storage (Person 2), ai (Person 3).
 
@@ -8,6 +8,7 @@ This file is the source of truth for every message that crosses a module boundar
 
 ## Changelog
 
+- v1.4: removed the Fetch.ai agent. Nurse alerts are bridge logic in bridge/main.py, with no external service. The ai module covers only Claude and Cartesia.
 - v1.3: a `TAP` in idle is ignored (FR20). A session still starts on `HOLD`.
 - v1.2: added the `HOLD_LONG` message for the 3-second direct nurse call (FR19), its keyboard key, and the key switch pull-up wiring note.
 - v1.1: added `LED phrase`, the `CFG hold_ms <n>` command, the patient profile file, audio clips, the no-activity alert, the mode-based button rules, and the direct nurse call.
@@ -220,9 +221,9 @@ Module: `ai/speak.py`, function `speak(phrase_id, text) -> None`.
 
 The current stub returns without playing audio and without raising.
 
-## 10. Bridge to AI: nurse alerts (Fetch.ai)
+## 10. Nurse alerts (bridge logic, no external service)
 
-Module: `ai/alert.py`, function `send_alert(kind, phrase_id, timestamp) -> None`.
+Implemented in bridge/main.py (publish and publish_no_activity). No external service.
 
 `kind` is `nurse_call` or `no_activity`.
 
