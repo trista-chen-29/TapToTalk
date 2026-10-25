@@ -17,6 +17,8 @@ from bridge.main import (
     led_resend_due,
     on_serial_connect,
     publish,
+    publish_escalations,
+    publish_no_activity,
     run_once,
 )
 from bridge.profile import PROFILE_PATH, load_profile
@@ -201,10 +203,22 @@ class AlertRuleTests(unittest.IsolatedAsyncioTestCase):
         self.runtime.last_input_at = 0.0
 
     def _alerts(self, kind: str) -> list[dict[str, object]]:
+        """Alerts as first broadcast. A later escalated update is not a new alert."""
         return [
             item
             for item in self.socket.sent
-            if item.get("type") == "alert" and item.get("kind") == kind
+            if item.get("type") == "alert"
+            and item.get("kind") == kind
+            and item.get("escalated") is not True
+        ]
+
+    def _escalations(self, kind: str) -> list[dict[str, object]]:
+        return [
+            item
+            for item in self.socket.sent
+            if item.get("type") == "alert"
+            and item.get("kind") == kind
+            and item.get("escalated") is True
         ]
 
     async def _nurse_call(self, now: float) -> None:
@@ -289,6 +303,96 @@ class AlertRuleTests(unittest.IsolatedAsyncioTestCase):
             self.clock.now = ended + limit + 10000
             await run_once(self.app)
             self.assertEqual(len(self._alerts("no_activity")), 2)
+
+    async def test_broadcast_alert_escalates_at_two_minutes(self) -> None:
+        await self._nurse_call(1000.0)
+        raised = self._alerts("nurse_call")
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(set(raised[0]), {"type", "kind", "phrase_id", "timestamp"})
+        stamp = raised[0]["timestamp"]
+
+        self.clock.now = 1119.999
+        await publish_escalations(self.app, self.clock.now)
+        self.assertEqual(self._escalations("nurse_call"), [])
+
+        self.clock.now = 1120.0
+        await publish_escalations(self.app, self.clock.now)
+        self.assertEqual(
+            self._escalations("nurse_call"),
+            [
+                {
+                    "type": "alert",
+                    "kind": "nurse_call",
+                    "phrase_id": "person_nurse",
+                    "timestamp": stamp,
+                    "escalated": True,
+                }
+            ],
+        )
+
+        self.clock.now = 1300.0
+        await publish_escalations(self.app, self.clock.now)
+        self.assertEqual(len(self._escalations("nurse_call")), 1)
+        self.assertEqual(len(self._alerts("nurse_call")), 1)
+
+    async def test_deduped_nurse_call_escalates_only_once(self) -> None:
+        await self._nurse_call(1000.0)
+        await self._nurse_call(1059.0)
+        self.assertEqual(len(self._alerts("nurse_call")), 1)
+        self.clock.now = 1120.0
+        await publish_escalations(self.app, self.clock.now)
+        self.clock.now = 1179.0
+        await publish_escalations(self.app, self.clock.now)
+        self.assertEqual(len(self._alerts("nurse_call")), 1)
+        self.assertEqual(len(self._escalations("nurse_call")), 1)
+
+    async def test_each_later_nurse_call_escalates_on_its_own_clock(self) -> None:
+        await self._nurse_call(1000.0)
+        await self._nurse_call(1061.0)
+        first, second = self._alerts("nurse_call")
+        self.clock.now = 1120.0
+        await publish_escalations(self.app, self.clock.now)
+        self.assertEqual(
+            [item["timestamp"] for item in self._escalations("nurse_call")],
+            [first["timestamp"]],
+        )
+        self.clock.now = 1181.0
+        await publish_escalations(self.app, self.clock.now)
+        self.assertEqual(
+            [item["timestamp"] for item in self._escalations("nurse_call")],
+            [first["timestamp"], second["timestamp"]],
+        )
+
+    async def test_no_activity_escalates_with_the_same_timestamp(self) -> None:
+        self.clock.now = 600.0
+        await publish_no_activity(self.app, self.clock.now)
+        raised = self._alerts("no_activity")
+        self.assertEqual(len(raised), 1)
+        self.assertIsNone(raised[0]["phrase_id"])
+        self.clock.now = 719.999
+        await publish_escalations(self.app, self.clock.now)
+        self.assertEqual(self._escalations("no_activity"), [])
+        self.clock.now = 720.0
+        await publish_escalations(self.app, self.clock.now)
+        self.assertEqual(
+            self._escalations("no_activity"),
+            [
+                {
+                    "type": "alert",
+                    "kind": "no_activity",
+                    "phrase_id": None,
+                    "timestamp": raised[0]["timestamp"],
+                    "escalated": True,
+                }
+            ],
+        )
+
+    async def test_loop_escalates_from_the_injected_clock(self) -> None:
+        await self._nurse_call(50.0)
+        self.clock.now = 170.0
+        await run_once(self.app)
+        self.assertEqual(len(self._alerts("nurse_call")), 1)
+        self.assertEqual(len(self._escalations("nurse_call")), 1)
 
 
 class _Clock:

@@ -1,6 +1,6 @@
 # CONTRACT.md: TapToTalk module interfaces
 
-Version: v1.6 (2026-10-25)
+Version: v1.7 (2026-10-25)
 
 Owners: firmware and bridge (Person 1), web and storage (Person 2), ai (Person 3).
 
@@ -8,6 +8,7 @@ This file is the source of truth for every message that crosses a module boundar
 
 ## Changelog
 
+- v1.7: two minutes after an alert is broadcast, the bridge sends that same alert with `"escalated": true` (FR11). The dashboard marks the existing card. No acknowledgement message is added.
 - v1.6: the bridge plays `cat_<category>.wav` when the highlighted category changes (FR12). A missing clip stays silent. Category highlights never call Cartesia.
 - v1.5: the bridge calls `rank_phrases` when a category is highlighted (FR8). Catalog order stays on screen when ranking is not ready, fails, or the highlight has moved (FR9).
 - v1.4: removed the Fetch.ai agent. Nurse alerts are bridge logic in bridge/main.py, with no external service. The ai module covers only Claude and Cartesia.
@@ -176,6 +177,14 @@ Alert message, sent when a nurse call or a no-activity alert is raised:
 
 `kind` is `nurse_call` or `no_activity`. For `no_activity`, `phrase_id` is `null`.
 
+Two minutes after the bridge broadcasts an alert, it sends that same message with `"escalated": true`:
+
+```json
+{"type": "alert", "kind": "nurse_call", "phrase_id": "person_nurse", "timestamp": "2026-10-24T02:15:00Z", "escalated": true}
+```
+
+`kind`, `phrase_id`, and `timestamp` match the alert already sent. The dashboard marks that card escalated and does not add a card.
+
 UI to bridge, sent when a person presses Speak or clicks a phrase:
 
 ```json
@@ -247,7 +256,7 @@ Sources:
 Agent rules:
 
 - Dedupe: a second alert of the same kind within 60 seconds is merged into the first and not sent again to the dashboard.
-- Escalate: if no acknowledgement arrives within 2 minutes, mark the alert as escalated on the dashboard.
+- Escalate: if no acknowledgement arrives within 2 minutes, mark the alert as escalated on the dashboard. No acknowledgement message is defined, so every broadcast alert is marked. The update is the section 7 alert with `"escalated": true`. The dashboard updates that card and does not add one.
 - The agent sends alerts only to the nurse dashboard in the web UI. It sends nothing to an outside party.
 - The nurse call works in every profile, including fixed buttons, audio off, and screen-only output.
 
