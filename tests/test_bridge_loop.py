@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from aiohttp.test_utils import TestClient, TestServer
 
+from bridge.log import connect
 from bridge.main import (
     RUNTIME,
     create_app,
@@ -47,10 +48,13 @@ class LedResendTests(unittest.TestCase):
 class BridgeLoopTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.save_patch = patch("bridge.main.save_selection", return_value=1)
+        self.alert_patch = patch("bridge.main.save_alert", return_value=1)
         self.speak_patch = patch("bridge.main.speak")
         self.save_selection = self.save_patch.start()
+        self.alert_patch.start()
         self.speak = self.speak_patch.start()
         self.addCleanup(self.save_patch.stop)
+        self.addCleanup(self.alert_patch.stop)
         self.addCleanup(self.speak_patch.stop)
         self.app = create_app()
         self.serial = RecordingSerial()
@@ -190,6 +194,12 @@ class BridgeLoopTests(unittest.IsolatedAsyncioTestCase):
 
 class AlertRuleTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.db_path = Path(self.directory.name) / "synthetic.db"
+        self.db_patch = patch("bridge.log.DB_PATH", self.db_path)
+        self.db_patch.start()
+        self.addCleanup(self.db_patch.stop)
         self.app = create_app()
         self.runtime = self.app[RUNTIME]
         self.serial = RecordingSerial()
@@ -199,6 +209,16 @@ class AlertRuleTests(unittest.IsolatedAsyncioTestCase):
         self.clock = _Clock(0.0)
         self.runtime.clock = self.clock
         self.runtime.last_input_at = 0.0
+
+    def _stored(self) -> list[dict[str, object]]:
+        connection = connect(self.db_path)
+        try:
+            return [
+                dict(row)
+                for row in connection.execute("SELECT * FROM alerts ORDER BY id")
+            ]
+        finally:
+            connection.close()
 
     def _alerts(self, kind: str) -> list[dict[str, object]]:
         return [
@@ -220,6 +240,12 @@ class AlertRuleTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(str(alerts[0]["timestamp"]).endswith("Z"))
         self.assertEqual(self.serial.sent, ["LED alert", "LED alert"])
         self.assertEqual(self.runtime.last_nurse_call_at, 1000.0)
+        stored = self._stored()
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(stored[0]["kind"], "nurse_call")
+        self.assertEqual(stored[0]["created_at"], alerts[0]["timestamp"])
+        self.assertEqual(stored[0]["escalated"], 0)
+        self.assertEqual(stored[0]["acknowledged"], 0)
 
     async def test_nurse_call_after_61_seconds_is_broadcast_again(self) -> None:
         await self._nurse_call(1000.0)
@@ -230,6 +256,9 @@ class AlertRuleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(alerts[1]["phrase_id"], "person_nurse")
         self.assertEqual(self.serial.sent, ["LED alert", "LED alert"])
         self.assertEqual(self.runtime.last_nurse_call_at, 1061.0)
+        stored = self._stored()
+        self.assertEqual([row["kind"] for row in stored], ["nurse_call", "nurse_call"])
+        self.assertEqual(stored[1]["created_at"], alerts[1]["timestamp"])
 
     async def test_no_activity_fires_once_until_the_next_session(self) -> None:
         raw = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
@@ -289,6 +318,26 @@ class AlertRuleTests(unittest.IsolatedAsyncioTestCase):
             self.clock.now = ended + limit + 10000
             await run_once(self.app)
             self.assertEqual(len(self._alerts("no_activity")), 2)
+            stored = self._stored()
+            self.assertEqual(
+                [row["kind"] for row in stored], ["no_activity", "no_activity"]
+            )
+            self.assertEqual(stored[0]["created_at"], alerts[0]["timestamp"])
+            self.assertEqual(stored[1]["created_at"], alerts[1]["timestamp"])
+            self.assertTrue(all(row["escalated"] == 0 for row in stored))
+            self.assertTrue(all(row["acknowledged"] == 0 for row in stored))
+
+    async def test_storage_failure_still_broadcasts_the_nurse_call(self) -> None:
+        with (
+            patch("bridge.main.save_alert", side_effect=RuntimeError("synthetic")),
+            self.assertLogs("bridge.main", level="WARNING") as caught,
+        ):
+            await self._nurse_call(50.0)
+        alerts = self._alerts("nurse_call")
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0]["phrase_id"], "person_nurse")
+        self.assertTrue(any("could not store" in line for line in caught.output))
+        self.assertEqual(self._stored(), [])
 
 
 class _Clock:

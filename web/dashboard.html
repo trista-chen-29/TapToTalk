@@ -18,16 +18,23 @@
         <span>Simulated channel. This is not a hospital nurse-call system or an emergency service.</span>
       </p>
       <section aria-labelledby="requests-heading">
-        <div class="section-heading"><h2 id="requests-heading">Received alerts</h2><p class="note counter" id="alert-summary" role="status">0 alerts received in this tab.</p></div>
+        <div class="section-heading"><h2 id="requests-heading">Alerts</h2><p class="note counter" id="alert-summary" role="status">0 alerts.</p></div>
         <div class="empty" id="alerts-empty">
           <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 23V13a9 9 0 0 1 18 0v10l3 3H4Zm6 6h6M16 1v3"/></svg>
-          <h3>No alerts received in this tab.</h3><p class="note">New requests will appear here while this view is open.</p>
+          <h3>No recent alerts.</h3><p class="note">Alerts stored on this laptop appear here when this view opens.</p>
         </div>
-        <ol class="alert-list" id="alert-list" aria-label="Received alerts"></ol>
+        <ol class="alert-list" id="alert-list" aria-label="Alerts"></ol>
+      </section>
+      <section aria-labelledby="history-heading">
+        <div class="section-heading"><h2 id="history-heading">Request history</h2><p class="note counter" id="request-summary" role="status">0 recent requests.</p></div>
+        <div class="empty" id="requests-empty">
+          <h3>No recent requests.</h3><p class="note">Phrase requests stored on this laptop appear here.</p>
+        </div>
+        <ol class="alert-list" id="request-list" aria-label="Recent phrase requests"></ol>
       </section>
       <!-- Announce each new alert through this dedicated region, not the whole list. -->
       <p class="note" id="dashboard-message" role="status" aria-live="polite" aria-atomic="true">Waiting for alerts.</p>
-      <aside class="info-callout"><p class="note">This tab shows only alerts received while open. Reloading clears this view; missed alerts are not recovered. Acknowledgement and escalation updates are not connected.</p></aside>
+      <aside class="info-callout"><p class="note">Recent alerts and phrase requests are stored on this laptop and restored when this view opens. Acknowledgement and escalation updates are not connected.</p></aside>
       <nav class="nav" aria-label="Other view"><a class="secondary-link" href="index.html"><span aria-hidden="true">←</span> Patient screen</a></nav>
     </main>
     <script>
@@ -38,24 +45,69 @@
       const summary = document.getElementById("alert-summary");
       const empty = document.getElementById("alerts-empty");
       const list = document.getElementById("alert-list");
+      const requestSummary = document.getElementById("request-summary");
+      const requestsEmpty = document.getElementById("requests-empty");
+      const requestList = document.getElementById("request-list");
       const feedback = document.getElementById("dashboard-message");
       const received = new Set();
       let total = 0;
+      const HISTORY_CAP = 30;
+      // Fixed catalog ids. The history message does not include phrase text.
+      const PHRASES = {
+        need_water: "needs",
+        need_bathroom: "needs",
+        need_suction: "needs",
+        need_position: "needs",
+        pain_here: "pain_comfort",
+        pain_medicine: "pain_comfort",
+        comfort_hot: "pain_comfort",
+        comfort_cold: "pain_comfort",
+        person_nurse: "people",
+        person_family: "people",
+        person_doctor: "people",
+        person_thanks: "people",
+        yes_yes: "yes_no",
+        yes_no: "yes_no",
+        yes_not_sure: "yes_no",
+        yes_repeat: "yes_no",
+      };
 
-      function renderAlert(alert) {
-        if (!alert || alert.type !== "alert") return;
-        const validKind = (alert.kind === "nurse_call" && alert.phrase_id === "person_nurse") ||
-          (alert.kind === "no_activity" && alert.phrase_id === null);
-        const stamp = alert.timestamp;
-        const validTime = typeof stamp === "string" &&
+      function localWhen(stamp) {
+        return new Date(stamp).toLocaleString(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+          timeZoneName: "short",
+        });
+      }
+
+      function validStamp(stamp) {
+        return typeof stamp === "string" &&
           /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(stamp) &&
           Number.isFinite(Date.parse(stamp)) &&
           new Date(stamp).toISOString() === (stamp.includes(".") ? stamp : stamp.replace("Z", ".000Z"));
-        if (!validKind || !validTime) {
-          feedback.textContent = "An invalid alert was ignored. Existing alerts are unchanged.";
-          return;
-        }
-        // Suppress only exact event replays. The agent owns the 60-second dedupe rule.
+      }
+
+      function alertRecord(alert) {
+        if (!alert || alert.type !== "alert") return false;
+        const validKind = (alert.kind === "nurse_call" && alert.phrase_id === "person_nurse") ||
+          (alert.kind === "no_activity" && alert.phrase_id === null);
+        return validKind && validStamp(alert.timestamp);
+      }
+
+      function selectionRecord(row) {
+        if (!row || typeof row !== "object") return false;
+        const sourceOk = row.source === "tap" || row.source === "keyboard" ||
+          row.source === "ui" || row.source === "fixed";
+        return PHRASES[row.phrase_id] === row.category && sourceOk &&
+          validStamp(row.selected_at);
+      }
+
+      function addAlert(alert, announce) {
+        const stamp = alert.timestamp;
+        // Suppress only exact event replays. The bridge owns the 60-second dedupe rule.
         const key = JSON.stringify([alert.kind, new Date(stamp).toISOString()]);
         if (received.has(key)) return;
         received.add(key);
@@ -66,37 +118,86 @@
         heading.textContent = alert.kind === "nurse_call" ? "Call nurse" : "No activity";
         const time = document.createElement("time");
         time.setAttribute("datetime", stamp);
-        const localTime = new Date(stamp).toLocaleString(undefined, {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-          hour: "numeric",
-          minute: "2-digit",
-          timeZoneName: "short",
-        });
-        time.textContent = `Raised: ${localTime}`;
+        time.textContent = `Raised: ${localWhen(stamp)}`;
         const status = document.createElement("p");
-        status.textContent = "Received in this tab. Acknowledgement status unavailable.";
+        status.textContent = "Acknowledgement status unavailable.";
         item.append(heading, time, status);
         list.prepend(item);
         empty.hidden = true;
-        summary.textContent = `${total} alert${total === 1 ? "" : "s"} received in this tab.`;
-        feedback.textContent = `New alert: ${heading.textContent}.`;
+        summary.textContent = `${total} alert${total === 1 ? "" : "s"}.`;
+        if (announce) feedback.textContent = `New alert: ${heading.textContent}.`;
+      }
+
+      function renderAlert(alert) {
+        if (!alert || alert.type !== "alert") return;
+        if (!alertRecord(alert)) {
+          feedback.textContent = "An invalid alert was ignored. Existing alerts are unchanged.";
+          return;
+        }
+        addAlert(alert, true);
+      }
+
+      function renderSelections(rows) {
+        const accepted = [];
+        for (const row of rows.slice(0, HISTORY_CAP)) {
+          if (selectionRecord(row)) accepted.push(row);
+        }
+        requestList.replaceChildren();
+        for (const row of accepted) {
+          const item = document.createElement("li");
+          item.className = "request-card";
+          const heading = document.createElement("h2");
+          heading.textContent = row.phrase_id;
+          const detail = document.createElement("p");
+          detail.textContent = `${row.category} · ${row.source}`;
+          const time = document.createElement("time");
+          time.setAttribute("datetime", row.selected_at);
+          time.textContent = `Selected: ${localWhen(row.selected_at)}`;
+          item.append(heading, detail, time);
+          requestList.append(item);
+        }
+        requestsEmpty.hidden = accepted.length > 0;
+        requestSummary.textContent =
+          `${accepted.length} recent request${accepted.length === 1 ? "" : "s"}.`;
+        return accepted.length;
+      }
+
+      function renderHistory(message) {
+        if (!Array.isArray(message.alerts) || !Array.isArray(message.selections)) {
+          feedback.textContent =
+            "An invalid history message was ignored. Existing alerts and requests are unchanged.";
+          return;
+        }
+        const alerts = message.alerts.slice(0, HISTORY_CAP);
+        for (let index = alerts.length - 1; index >= 0; index -= 1) {
+          if (alertRecord(alerts[index])) addAlert(alerts[index], false);
+        }
+        const requestCount = renderSelections(message.selections);
+        feedback.textContent = total === 0 && requestCount === 0
+          ? "No stored alerts or requests."
+          : `Showing ${total} alerts and ${requestCount} requests from this laptop.`;
       }
 
       function connectDashboard() {
-        const socket = new WebSocket(`ws://${window.location.host}/`);
+        const socket = new WebSocket(`ws://${window.location.host}/?client=dashboard`);
         socket.addEventListener("open", () => {
           connection.setAttribute("data-connection", "connected");
           connection.textContent = "Connected to local bridge";
-          feedback.textContent = "Listening for alerts. Earlier or missed alerts are not recovered.";
+          feedback.textContent = "Loading recent alerts and requests from this laptop.";
         });
         socket.addEventListener("message", (event) => {
+          let message;
           try {
-            renderAlert(JSON.parse(event.data));
+            message = JSON.parse(event.data);
           } catch {
             feedback.textContent = "An unreadable message was ignored. Existing alerts are unchanged.";
+            return;
           }
+          if (message && message.type === "history") {
+            renderHistory(message);
+            return;
+          }
+          renderAlert(message);
         });
         socket.addEventListener("error", () => {
           connection.setAttribute("data-connection", "disconnected");
@@ -105,7 +206,7 @@
         socket.addEventListener("close", () => {
           connection.setAttribute("data-connection", "disconnected");
           connection.textContent = "Disconnected — reconnecting. New alerts may be missed.";
-          feedback.textContent = "Previously received alerts remain visible. Missed alerts are not recovered.";
+          feedback.textContent = "Alerts on screen stay visible. Reconnecting loads stored alerts and requests.";
           window.setTimeout(connectDashboard, 2000);
         });
       }

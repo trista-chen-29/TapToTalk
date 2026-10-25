@@ -43,15 +43,18 @@ class TimeOfDayTests(unittest.TestCase):
 class RankMenuTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.save_patch = patch("bridge.main.save_selection", return_value=1)
+        self.alert_patch = patch("bridge.main.save_alert", return_value=1)
         self.speak_patch = patch("bridge.main.speak")
         self.recent_patch = patch(
             "bridge.main.recent_phrase_ids",
             return_value=["pain_here", "need_water"],
         )
         self.save_patch.start()
+        self.alert_patch.start()
         self.speak_patch.start()
         self.recent_patch.start()
         self.addCleanup(self.save_patch.stop)
+        self.addCleanup(self.alert_patch.stop)
         self.addCleanup(self.speak_patch.stop)
         self.addCleanup(self.recent_patch.stop)
         self.app = create_app()

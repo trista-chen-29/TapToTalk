@@ -16,9 +16,10 @@ function setup() {
     constructor() { this.children = []; this.attributes = {}; this.hidden = false; }
     append(...items) { this.children.push(...items); }
     prepend(item) { this.children.unshift(item); }
+    replaceChildren(...items) { this.children = items; }
     setAttribute(key, value) { this.attributes[key] = value; }
   }
-  const elements = Object.fromEntries(['dashboard-connection', 'alert-summary', 'alerts-empty', 'alert-list', 'dashboard-message'].map(id => [id, new Element()]));
+  const elements = Object.fromEntries(['dashboard-connection', 'alert-summary', 'alerts-empty', 'alert-list', 'request-summary', 'requests-empty', 'request-list', 'dashboard-message'].map(id => [id, new Element()]));
   const sockets = [];
   const timers = [];
   class Socket {
@@ -39,7 +40,7 @@ function setup() {
 
 test('connects to existing socket and ignores patient state', () => {
   const { elements, sockets, receive } = setup();
-  assert.equal(sockets[0].url, 'ws://localhost:8765/');
+  assert.equal(sockets[0].url, 'ws://localhost:8765/?client=dashboard');
   sockets[0].events.open();
   assert.match(elements['dashboard-connection'].textContent, /Connected/);
   receive({type: 'state', mode: 'idle'});
@@ -73,7 +74,7 @@ test('renders both contract alert kinds newest received first in local time', ()
   assert.doesNotMatch(rows[0].children[1].textContent, /\(UTC\)/);
   assert.match(rows[0].children[2].textContent, /status unavailable/);
   assert.equal(elements['alerts-empty'].hidden, true);
-  assert.equal(elements['alert-summary'].textContent, '2 alerts received in this tab.');
+  assert.equal(elements['alert-summary'].textContent, '2 alerts.');
 });
 
 test('ignores exact replays, including equivalent timestamps, without merging distinct events', () => {
@@ -116,7 +117,7 @@ test('disconnect preserves alerts, warns of missed messages and reconnects witho
   assert.match(elements['dashboard-connection'].textContent, /may be missed/);
   sockets[0].events.close();
   assert.equal(elements['alert-list'].children.length, 1);
-  assert.match(elements['dashboard-message'].textContent, /not recovered/);
+  assert.match(elements['dashboard-message'].textContent, /stay visible/);
   timers[0]();
   sockets[1].events.open();
   receive(alert());
@@ -147,8 +148,116 @@ test('two-minute boundary documents blocked escalation without fabricating statu
     receive(alert('nurse_call', '2026-10-24T02:15:00Z'));
     assert.equal(elements['alert-list'].children.length, 1);
     assert.equal(card.children[0].textContent, 'Call nurse');
-    assert.equal(card.children[2].textContent,
-      'Received in this tab. Acknowledgement status unavailable.');
+    assert.equal(card.children[2].textContent, 'Acknowledgement status unavailable.');
     assert.equal(timers.length, 0);
   }
+});
+
+function localSelected(stamp) {
+  const formatted = new Date(stamp).toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  });
+  return `Selected: ${formatted}`;
+}
+
+test('history restores alerts and requests in local time without extra fields', () => {
+  const { elements, receive, alert } = setup();
+  receive({
+    type: 'history',
+    alerts: [
+      alert('no_activity', '2026-10-24T02:20:00Z'),
+      alert('nurse_call', '2026-10-24T02:15:00Z'),
+    ],
+    selections: [
+      {
+        phrase_id: 'need_water', category: 'needs', source: 'keyboard',
+        selected_at: '2026-10-24T02:16:00Z', text: '<script>unsafe</script>',
+        patient_name: 'SYNTHETIC-IGNORED',
+      },
+      {
+        phrase_id: 'need_bathroom', category: 'needs', source: 'tap',
+        selected_at: '2026-10-24T02:10:00Z',
+      },
+    ],
+  });
+  const alerts = elements['alert-list'].children;
+  assert.equal(alerts.length, 2);
+  assert.equal(alerts[0].children[0].textContent, 'No activity');
+  assert.equal(alerts[1].children[0].textContent, 'Call nurse');
+  assert.equal(alerts[0].children[1].attributes.datetime, '2026-10-24T02:20:00Z');
+  assert.equal(alerts[0].children[1].textContent, localRaised('2026-10-24T02:20:00Z'));
+  assert.doesNotMatch(alerts[0].children[1].textContent, /\(UTC\)/);
+  const requests = elements['request-list'].children;
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].children[0].textContent, 'need_water');
+  assert.equal(requests[0].children[1].textContent, 'needs · keyboard');
+  assert.equal(requests[0].children[2].attributes.datetime, '2026-10-24T02:16:00Z');
+  assert.equal(requests[0].children[2].textContent, localSelected('2026-10-24T02:16:00Z'));
+  assert.equal(requests[1].children[0].textContent, 'need_bathroom');
+  const rendered = requests[0].children.map(child => child.textContent).join(" ");
+  assert.equal(rendered.includes('SYNTHETIC-IGNORED'), false);
+  assert.equal(rendered.includes('unsafe'), false);
+  assert.equal(elements['alerts-empty'].hidden, true);
+  assert.equal(elements['requests-empty'].hidden, true);
+  assert.match(elements['dashboard-message'].textContent, /Showing 2 alerts and 2 requests/);
+  assert.doesNotMatch(html, /<button/i);
+});
+
+test('a second history message does not duplicate alerts and replaces requests', () => {
+  const { elements, receive, alert } = setup();
+  const history = {
+    type: 'history',
+    alerts: [alert()],
+    selections: [
+      {phrase_id: 'need_water', category: 'needs', source: 'ui', selected_at: '2026-10-24T02:16:00Z'},
+      {phrase_id: 'yes_yes', category: 'yes_no', source: 'fixed', selected_at: '2026-10-24T02:10:00Z'},
+    ],
+  };
+  receive(history);
+  receive(history);
+  assert.equal(elements['alert-list'].children.length, 1);
+  receive({
+    type: 'history',
+    alerts: [alert()],
+    selections: [
+      {phrase_id: 'pain_here', category: 'pain_comfort', source: 'tap', selected_at: '2026-10-24T02:18:00Z'},
+    ],
+  });
+  assert.equal(elements['alert-list'].children.length, 1);
+  assert.equal(elements['request-list'].children.length, 1);
+  assert.equal(elements['request-list'].children[0].children[0].textContent, 'pain_here');
+  assert.equal(elements['request-summary'].textContent, '1 recent request.');
+});
+
+test('invalid history and bad request rows leave stored cards unchanged', () => {
+  const { elements, receive, alert } = setup();
+  receive({
+    type: 'history',
+    alerts: [alert('nurse_call', '2026-10-24T02:15:00Z')],
+    selections: [
+      {phrase_id: 'need_water', category: 'needs', source: 'keyboard', selected_at: '2026-10-24T02:16:00Z'},
+    ],
+  });
+  receive({type: 'history', alerts: 'nope'});
+  assert.equal(elements['alert-list'].children.length, 1);
+  assert.equal(elements['request-list'].children.length, 1);
+  assert.match(elements['dashboard-message'].textContent, /invalid history/);
+  receive({
+    type: 'history',
+    alerts: [{...alert(), kind: 'other'}, alert('no_activity', '2026-10-24T02:20:00Z')],
+    selections: [
+      {phrase_id: 'not a phrase', category: 'needs', source: 'keyboard', selected_at: '2026-10-24T02:16:00Z'},
+      {phrase_id: 'need_water', category: 'people', source: 'keyboard', selected_at: '2026-10-24T02:16:00Z'},
+      {phrase_id: 'need_water', category: 'needs', source: 'sensor', selected_at: '2026-10-24T02:16:00Z'},
+      {phrase_id: 'yes_no', category: 'yes_no', source: 'ui', selected_at: '2026-10-24T02:17:00Z'},
+    ],
+  });
+  assert.equal(elements['alert-list'].children[0].children[0].textContent, 'No activity');
+  assert.equal(elements['request-list'].children.length, 1);
+  assert.equal(elements['request-list'].children[0].children[0].textContent, 'yes_no');
 });

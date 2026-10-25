@@ -12,7 +12,14 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
-from bridge.log import connect, recent_phrase_ids, save_selection
+from bridge.log import (
+    connect,
+    recent_alerts,
+    recent_phrase_ids,
+    recent_selections,
+    save_alert,
+    save_selection,
+)
 from bridge.phrases import load_phrases
 
 
@@ -187,3 +194,114 @@ class RequestLogTests(unittest.TestCase):
                 self.assertEqual(row["escalated"], 0)
                 self.assertEqual(row["acknowledged"], 0)
         self.assertEqual(self.selection_rows(), [])
+
+    def test_save_alert_persists_kind_and_leaves_flags_clear(self) -> None:
+        row_id = save_alert(
+            "nurse_call", db_path=self.db_path, created_at="2026-10-24T02:15:00Z"
+        )
+        save_alert(
+            "no_activity", db_path=self.db_path, created_at="2026-10-24T02:20:00Z"
+        )
+        with closing(connect(self.db_path)) as connection:
+            rows = [
+                dict(row)
+                for row in connection.execute("SELECT * FROM alerts ORDER BY id")
+            ]
+        self.assertEqual(rows[0]["id"], row_id)
+        self.assertEqual([row["kind"] for row in rows], ["nurse_call", "no_activity"])
+        for row in rows:
+            self.assertEqual(row["escalated"], 0)
+            self.assertEqual(row["acknowledged"], 0)
+        self.assertEqual(self.selection_rows(), [])
+
+    def test_save_alert_rejects_unknown_kind(self) -> None:
+        with self.assertRaises(ValueError):
+            save_alert("escalated", db_path=self.db_path)
+        with closing(connect(self.db_path)) as connection:
+            count = connection.execute("SELECT COUNT(*) FROM alerts").fetchone()[0]
+        self.assertEqual(count, 0)
+        self.assertEqual(self.selection_rows(), [])
+
+    def test_recent_alerts_are_newest_first_and_capped(self) -> None:
+        for index in range(31):
+            kind = "nurse_call" if index % 2 == 0 else "no_activity"
+            save_alert(
+                kind,
+                db_path=self.db_path,
+                created_at=f"2026-10-24T02:15:{index:02d}Z",
+            )
+        rows = recent_alerts(db_path=self.db_path)
+        self.assertEqual(len(rows), 30)
+        self.assertEqual(
+            rows[0], {"kind": "nurse_call", "created_at": "2026-10-24T02:15:30Z"}
+        )
+        self.assertEqual(set(rows[0]), {"kind", "created_at"})
+        self.assertNotIn("2026-10-24T02:15:00Z", [row["created_at"] for row in rows])
+        self.assertEqual(recent_alerts(0, db_path=self.db_path), [])
+        with closing(connect(self.db_path)) as connection:
+            connection.execute(
+                "INSERT INTO alerts (kind, created_at) VALUES (?, ?)",
+                ("other", "2026-10-24T02:16:00Z"),
+            )
+            connection.commit()
+        self.assertNotIn(
+            "other", [row["kind"] for row in recent_alerts(db_path=self.db_path)]
+        )
+
+    def test_recent_selections_skip_unknown_rows_and_cap_at_thirty(self) -> None:
+        for index in range(31):
+            save_selection(
+                "need_water",
+                "needs",
+                "keyboard",
+                db_path=self.db_path,
+                selected_at=f"2026-10-24T03:15:{index:02d}Z",
+            )
+        rows = recent_selections(db_path=self.db_path)
+        self.assertEqual(len(rows), 30)
+        self.assertEqual(rows[0]["selected_at"], "2026-10-24T03:15:30Z")
+        self.assertEqual(
+            set(rows[0]), {"phrase_id", "category", "source", "selected_at"}
+        )
+        self.assertNotIn("2026-10-24T03:15:00Z", [row["selected_at"] for row in rows])
+        self.assertEqual(recent_selections(0, db_path=self.db_path), [])
+        with closing(connect(self.db_path)) as connection:
+            connection.execute(
+                """
+                INSERT INTO selections (phrase_id, category, source, selected_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("not_a_phrase", "needs", "keyboard", "2026-10-24T04:15:00Z"),
+            )
+            connection.execute(
+                """
+                INSERT INTO selections (phrase_id, category, source, selected_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("need_water", "people", "sensor", "2026-10-24T04:15:01Z"),
+            )
+            connection.commit()
+        visible = [
+            row["phrase_id"] for row in recent_selections(5, db_path=self.db_path)
+        ]
+        self.assertNotIn("not_a_phrase", visible)
+        self.assertTrue(all(phrase_id == "need_water" for phrase_id in visible))
+        save_selection(
+            "need_bathroom",
+            "needs",
+            "ui",
+            db_path=self.db_path,
+            selected_at="2026-10-24T03:15:30Z",
+        )
+        save_selection(
+            "need_bathroom",
+            "needs",
+            "ui",
+            db_path=self.db_path,
+            selected_at="2026-10-24T03:15:30Z",
+        )
+        latest = recent_selections(2, db_path=self.db_path)
+        self.assertEqual(len(latest), 2)
+        self.assertEqual(
+            [row["phrase_id"] for row in latest], ["need_bathroom", "need_bathroom"]
+        )

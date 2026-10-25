@@ -460,6 +460,32 @@ h3 {
   color: var(--muted);
 }
 
+.nurse-dashboard section + section {
+  margin-top: var(--space-4);
+}
+
+.request-card {
+  margin-bottom: var(--space-2);
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 2px solid var(--line);
+  border-left-width: 8px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow-wrap: anywhere;
+}
+
+.request-card h2 {
+  font-size: 32px;
+  margin-bottom: 16px;
+}
+
+.request-card time,
+.request-card p {
+  display: block;
+  margin-bottom: 8px;
+}
+
 /* Reserved visual variant only; no acknowledgement behavior is implemented. */
 .alert-card[data-status="acknowledged"] {
   border-color: var(--line);
@@ -565,7 +591,7 @@ h3 {
     --muted: var(--ink);
     --shadow: none;
   }
-  .tile, .banner, .alert-card {
+  .tile, .banner, .alert-card, .request-card {
     border-width: 3px;
   }
   :where(button, a, summary):focus-visible {

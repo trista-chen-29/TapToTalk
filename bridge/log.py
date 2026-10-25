@@ -15,6 +15,8 @@ from bridge.phrases import load_phrases
 
 DB_PATH = Path(__file__).with_name("taptotalk.db")
 SOURCES = frozenset({"tap", "keyboard", "ui", "fixed"})
+ALERT_KINDS = frozenset({"nurse_call", "no_activity"})
+HISTORY_LIMIT = 30
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS selections (
@@ -88,6 +90,39 @@ def save_selection(
     return int(row_id)
 
 
+def save_alert(
+    kind: str,
+    *,
+    db_path: Path | None = None,
+    created_at: str | None = None,
+) -> int:
+    """Insert one alerts row and return its id.
+
+    ``escalated`` and ``acknowledged`` stay at the schema default of 0.
+    This does not write a selections row or any identifying column.
+    """
+    if kind not in ALERT_KINDS:
+        raise ValueError("kind must be nurse_call or no_activity")
+
+    when = utc_now() if created_at is None else created_at
+    connection = connect(db_path)
+    try:
+        cursor = connection.execute(
+            """
+            INSERT INTO alerts (kind, created_at)
+            VALUES (?, ?)
+            """,
+            (kind, when),
+        )
+        connection.commit()
+        row_id = cursor.lastrowid
+    finally:
+        connection.close()
+    if row_id is None:
+        raise RuntimeError("insert did not return a row id")
+    return int(row_id)
+
+
 def recent_phrase_ids(limit: int = 5, *, db_path: Path | None = None) -> list[str]:
     """Return up to ``limit`` phrase ids, oldest first.
 
@@ -117,4 +152,77 @@ def recent_phrase_ids(limit: int = 5, *, db_path: Path | None = None) -> list[st
         if len(chosen) == limit:
             break
     chosen.reverse()
+    return chosen
+
+
+def recent_alerts(
+    limit: int = HISTORY_LIMIT, *, db_path: Path | None = None
+) -> list[dict[str, str]]:
+    """Return up to ``limit`` alerts, newest first.
+
+    Each item has ``kind`` and ``created_at`` only.
+    """
+    if limit < 1:
+        return []
+    connection = connect(db_path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT kind, created_at FROM alerts
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    finally:
+        connection.close()
+    chosen: list[dict[str, str]] = []
+    for row in rows:
+        kind = str(row["kind"])
+        if kind not in ALERT_KINDS:
+            continue
+        chosen.append({"kind": kind, "created_at": str(row["created_at"])})
+    return chosen
+
+
+def recent_selections(
+    limit: int = HISTORY_LIMIT, *, db_path: Path | None = None
+) -> list[dict[str, str]]:
+    """Return up to ``limit`` selections, newest first.
+
+    Each item has phrase id, category, source, and selected_at only.
+    Rows whose phrase id is not in the catalog are omitted.
+    """
+    if limit < 1:
+        return []
+    known = {item["id"]: item["category"] for item in load_phrases()["phrases"]}
+    connection = connect(db_path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT phrase_id, category, source, selected_at FROM selections
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    finally:
+        connection.close()
+    chosen: list[dict[str, str]] = []
+    for row in rows:
+        phrase_id = str(row["phrase_id"])
+        category = str(row["category"])
+        source = str(row["source"])
+        if phrase_id not in known or known[phrase_id] != category:
+            continue
+        if source not in SOURCES:
+            continue
+        chosen.append(
+            {
+                "phrase_id": phrase_id,
+                "category": category,
+                "source": source,
+                "selected_at": str(row["selected_at"]),
+            }
+        )
     return chosen
