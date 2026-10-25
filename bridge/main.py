@@ -167,7 +167,11 @@ def create_app() -> web.Application:
     """Build the bridge server without starting serial or the keyboard."""
     profile = load_profile()
     catalog = load_phrases(language=profile["language"])
-    machine = Machine(catalog)
+    machine = Machine(
+        catalog,
+        menu=profile["menu"],
+        fixed_buttons=profile["fixed_buttons"],
+    )
     now = time.monotonic()
     runtime = Runtime(
         profile=profile,
@@ -245,18 +249,23 @@ def on_serial_connect(app: web.Application) -> None:
     send_led(runtime, runtime.last_led, time.monotonic())
 
 
-def send_hold_config(app: web.Application) -> None:
-    """Send CFG hold_ms from the profile. An edit applies on the next session."""
-    runtime = app[RUNTIME]
+def reload_profile(runtime: Runtime) -> Profile:
+    """Load the bedside profile. Keep the previous one when the file is bad."""
     try:
         profile = load_profile(runtime.profile_path)
     except Exception:
         logger.warning("profile was not reloaded; keeping the previous hold time")
-        profile = runtime.profile
-    else:
-        runtime.profile = profile
-        if runtime.keyboard is not None:
-            runtime.keyboard.set_hold_ms(profile["hold_ms"])
+        return runtime.profile
+    runtime.profile = profile
+    if runtime.keyboard is not None:
+        runtime.keyboard.set_hold_ms(profile["hold_ms"])
+    return profile
+
+
+def send_hold_config(app: web.Application) -> None:
+    """Send CFG hold_ms from the profile. An edit applies on the next session."""
+    runtime = app[RUNTIME]
+    profile = reload_profile(runtime)
     if runtime.serial is not None:
         runtime.serial.send(cfg_hold_ms(profile["hold_ms"]))
 
@@ -331,6 +340,11 @@ def _log_source(source: str) -> str | None:
     return _LOG_SOURCES.get(source)
 
 
+def _speech_enabled(profile: Profile) -> bool:
+    """True when this loaded profile should play phrase audio."""
+    return profile["audio_on"] and profile["output"] != "screen"
+
+
 async def _speak(phrase_id: str, text: str) -> None:
     """Speak one phrase off the event loop. A failure stays in the log."""
     try:
@@ -398,7 +412,8 @@ async def publish(
                                 runtime, effect.phrase_id, effect.source, now
                             )
                         save_selection(effect.phrase_id, phrase["category"], source)
-                        await _speak(effect.phrase_id, phrase["text"])
+                        if _speech_enabled(runtime.profile):
+                            await _speak(effect.phrase_id, phrase["text"])
             elif isinstance(effect, NurseCall):
                 await publish_nurse_call(runtime, effect.phrase_id, effect.source, now)
             elif isinstance(effect, str):
@@ -579,6 +594,8 @@ async def finish_rank(
 
 def apply_pending_rank(runtime: Runtime, previous: str, state: State) -> State:
     """Use a finished ranking as the first phrase list when it is ready."""
+    if runtime.profile["menu"] == "fixed":
+        return state
     if previous == "phrase" or state["mode"] != "phrase":
         return state
     result = runtime.rank_result
@@ -645,8 +662,15 @@ async def _play_category(
 
 
 def follow_rank(app: web.Application, before: State, state: State) -> None:
-    """Start ranking for a newly highlighted category, or cancel it."""
+    """Start ranking for a newly highlighted category, or cancel it.
+
+    Fixed button mode has no category menu, so it does not call the ranker.
+    """
     runtime = app[RUNTIME]
+    if runtime.profile["menu"] == "fixed":
+        if state["mode"] == "idle" and before["mode"] != "idle":
+            cancel_rank(runtime)
+        return
     if before["mode"] == "phrase" or (
         state["mode"] == "idle" and before["mode"] != "idle"
     ):
@@ -673,11 +697,14 @@ async def handle_item(
     before = machine.snapshot()
     previous = before["mode"]
     runtime.last_input_at = now
+    if before["mode"] == "idle" and event == "HOLD":
+        profile = reload_profile(runtime)
+        machine.use_profile_menu(profile["menu"], profile["fixed_buttons"])
     if event == "RESET":
         state, effects = machine.reset()
     else:
         state, effects = machine.handle(event, source, now)
-    if previous == "idle" and state["mode"] == "category":
+    if previous == "idle" and state["mode"] != "idle":
         runtime.no_activity_sent = False
         send_hold_config(app)
     state = apply_pending_rank(runtime, previous, state)
@@ -689,8 +716,9 @@ async def handle_item(
 async def publish_no_activity(app: web.Application, now: float) -> None:
     """Broadcast one no-activity alert per idle period.
 
-    The quiet time is profile idle_alert_minutes with no input. A new session
-    (idle to category) arms one more alert for the following idle period.
+    The quiet time is profile idle_alert_minutes with no input. A new session,
+    leaving idle for a category or the fixed buttons, arms one more alert for
+    the following idle period.
     CONTRACT.md section 7.
     """
     runtime = app[RUNTIME]

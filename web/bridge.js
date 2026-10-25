@@ -93,8 +93,10 @@ function renderState(state) {
       !Number.isInteger(state.highlight_index) || state.highlight_index < 0 ||
       !validPhrases || new Set(phrases.map((phrase) => phrase.id)).size !== phrases.length ||
       (state.mode === "category" && state.highlight_index >= categories.length) ||
-      (state.mode === "phrase" && (categoryIndex < 0 ||
-        state.highlight_index >= phrases.length))) {
+      (state.mode === "phrase" && (
+        state.highlight_index >= phrases.length ||
+        (state.category != null && categoryIndex < 0)
+      ))) {
     clearSelection();
     mode.textContent = "Mode: unavailable";
     message.textContent = "Could not read the bridge state. Waiting for an update.";
@@ -117,14 +119,18 @@ function renderState(state) {
   message.textContent = `Test message received: bridge state (${state.mode}).`;
   if (state.mode === "idle") return;
 
-  const selectedCategory = state.mode === "category"
-    ? state.highlight_index : categoryIndex;
-  const categoryTile = categoryGrid.children[selectedCategory];
-  categoryTile.classList.add("highlight");
-  categoryTile.setAttribute("aria-current", "true");
+  if (state.mode === "category" || categoryIndex >= 0) {
+    const selectedCategory = state.mode === "category"
+      ? state.highlight_index : categoryIndex;
+    const categoryTile = categoryGrid.children[selectedCategory];
+    categoryTile.classList.add("highlight");
+    categoryTile.setAttribute("aria-current", "true");
+  }
   if (state.mode !== "phrase") return;
 
-  phraseHeading.textContent = `${categories[categoryIndex][1]} phrases`;
+  phraseHeading.textContent = categoryIndex >= 0
+    ? `${categories[categoryIndex][1]} phrases`
+    : "Phrases";
   phrases.forEach((phrase, index) => {
     const item = document.createElement("li");
     const button = document.createElement("button");

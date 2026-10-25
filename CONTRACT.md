@@ -1,6 +1,6 @@
 # CONTRACT.md: TapToTalk module interfaces
 
-Version: v1.6 (2026-10-25)
+Version: v1.7 (2026-10-25)
 
 Owners: firmware and bridge (Person 1), web and storage (Person 2), ai (Person 3).
 
@@ -8,6 +8,7 @@ This file is the source of truth for every message that crosses a module boundar
 
 ## Changelog
 
+- v1.7: fixed button mode (FR15). `HOLD` from idle opens `fixed_buttons` with no category step. `TAP` and `SELECT` choose the highlighted button. `HOLD` on that list advances the highlight and does not choose. Ranking is not called.
 - v1.6: the bridge plays `cat_<category>.wav` when the highlighted category changes (FR12). A missing clip stays silent. Category highlights never call Cartesia.
 - v1.5: the bridge calls `rank_phrases` when a category is highlighted (FR8). Catalog order stays on screen when ranking is not ready, fails, or the highlight has moved (FR9).
 - v1.4: removed the Fetch.ai agent. Nurse alerts are bridge logic in bridge/main.py, with no external service. The ai module covers only Claude and Cartesia.
@@ -39,7 +40,7 @@ Board: Raspberry Pi Pico, chosen 2026-10-23. The ESP32 is a backup only, if the 
 | --- | --- | --- |
 | `LED idle` | off | Waiting for input |
 | `LED listening` | solid blue | Category mode: the patient is choosing a category |
-| `LED phrase` | blinking blue | Phrase mode: the patient is choosing a phrase |
+| `LED phrase` | blinking blue | Phrase mode, or fixed button mode: the patient is choosing a phrase |
 | `LED sent` | green | A phrase is being spoken |
 | `LED alert` | red | A nurse call or a no-activity alert was sent |
 
@@ -77,6 +78,22 @@ This table is the single source for the state machine. The bridge and the Pico b
 - A deliberate hold is needed to start a session, so touches from a blanket or bed rail do nothing (FR20).
 - Holding 1 second in idle starts a session. Holding 3 seconds sends Call nurse. Do not change these times without the team.
 
+When `menu` is `fixed`, ignore the category and phrase columns. There is no category step. The session is the fixed button list:
+
+| Input | Idle | Fixed button mode |
+| --- | --- | --- |
+| `TAP` | Ignored | Choose the highlighted button |
+| `HOLD` (1 s) | Open `fixed_buttons` at highlight 0. `LED phrase`. No category step | Advance the highlight. Do not choose |
+| `HOLD_LONG` (3 s) | Send Call nurse directly (FR19) | Same as idle |
+| `SELECT` | Ignored | Choose the highlighted button, same as `TAP` |
+
+- The list is `fixed_buttons` in profile order, with catalog text. Highlight index 0 is the first id. The highlight wraps after the last button.
+- `HOLD` on the open list is how one sensor reaches button 2, 3, or 4.
+- Choosing a button speaks it, logs it, sets `LED sent`, then returns to idle. `person_nurse` also sends the nurse call.
+- Ranking is not called. The list stays in profile order.
+- The 1-second session hold and the 3-second nurse hold do not change.
+- Esc and 8 seconds with no input return to idle, same as category mode.
+
 ## 5. Patient profile
 
 Module: `bridge/profile.json`. One file for the bed the device is on. The nurse sets it at the bedside.
@@ -99,7 +116,7 @@ Rules:
 
 - `profile_id` is a label such as `bed-1`. It never holds a name, a date of birth, or a room number.
 - `input` is `touch`, `key`, or `both`. `output` is `audio`, `screen`, or `both`.
-- `menu` is `categories` or `fixed`. With `fixed`, `fixed_buttons` lists 2 to 4 phrase ids, and each tap selects one button.
+- `menu` is `categories` or `fixed`. With `fixed`, `fixed_buttons` lists 2 to 4 phrase ids. `HOLD` from idle opens that list, `TAP` selects the highlighted button, and `HOLD` while the list is open advances the highlight.
 - `language` picks the phrase file and audio clips (FR21).
 - `hold_ms`, `audio_on`, and `idle_alert_minutes` are starting defaults. Agree them at the table before the demo.
 - Changes apply at the start of the next session.
@@ -166,7 +183,7 @@ State message, sent on every state change:
 
 - `mode` is `idle`, `category`, or `phrase`.
 - `highlight_index` indexes categories in category mode, and phrases (or `fixed_buttons`) in phrase mode.
-- `phrases` is empty in category mode. In phrase mode it holds the ranked list.
+- `phrases` is empty in category mode. In phrase mode it holds the ranked list. Fixed button mode sends `mode` `phrase`, `category` null, and `phrases` set to `fixed_buttons` in profile order with catalog text. It does not send a category step.
 
 Alert message, sent when a nurse call or a no-activity alert is raised:
 
@@ -210,7 +227,7 @@ Output: a list of phrase ids, ranked, containing exactly the candidate ids.
 
 Failure rule: if the call errors, times out after 3 seconds, or returns an id not in `candidates`, return `candidates` unchanged. Cache a successful ranking for 60 seconds, keyed on the input.
 
-The bridge calls `rank_phrases` when a category is highlighted. Phrase mode uses that ranking when it is already ready. Otherwise the screen shows catalog order, then replaces it only while the highlight is still the first phrase. A failure, a timeout, an invalid list, or a highlight the patient has already moved leaves catalog order in place. Ranking never blocks a phrase choice or a nurse call.
+The bridge calls `rank_phrases` when a category is highlighted. Phrase mode uses that ranking when it is already ready. Otherwise the screen shows catalog order, then replaces it only while the highlight is still the first phrase. A failure, a timeout, an invalid list, or a highlight the patient has already moved leaves catalog order in place. Ranking never blocks a phrase choice or a nurse call. Fixed button mode does not highlight a category and does not call `rank_phrases`.
 
 ## 9. Bridge to AI: speech (Cartesia)
 
