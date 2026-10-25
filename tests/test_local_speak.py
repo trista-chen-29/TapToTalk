@@ -276,7 +276,12 @@ class RealCatalogSpeechTests(unittest.TestCase):
     def test_mandarin_and_russian_skip_english_audio(self) -> None:
         (self.audio_dir / "need_water.wav").write_bytes(b"english-water")
         (self.audio_dir / "cat_needs.wav").write_bytes(b"english-needs")
-        samples = {"zh": "我需要水", "ru": "Мне нужна вода"}
+        samples = {
+            "zh": "我需要水",
+            "ru": "Мне нужна вода",
+            "hi": "मुझे पानी चाहिए",
+            "vi": "Tôi cần nước",
+        }
         for language, text in samples.items():
             with self.subTest(language=language):
                 self.profile["language"] = language

@@ -71,6 +71,8 @@ class CatalogTests(unittest.TestCase):
         samples = {
             "zh": ("我需要水", "请叫护士"),
             "ru": ("Мне нужна вода", "Позовите медсестру"),
+            "hi": ("मुझे पानी चाहिए", "नर्स को बुलाइए"),
+            "vi": ("Tôi cần nước", "Gọi y tá"),
         }
         for language, (water, nurse_text) in samples.items():
             with self.subTest(language=language):
@@ -125,6 +127,18 @@ class CatalogTests(unittest.TestCase):
                 "Мне нужно в туалет",
                 "Мне нужно отсасывание",
                 "Пожалуйста, поменяйте моё положение",
+            ),
+            "hi": (
+                "मुझे पानी चाहिए",
+                "मुझे शौचालय जाना है",
+                "मुझे सक्शन चाहिए",
+                "कृपया मेरी स्थिति बदलें",
+            ),
+            "vi": (
+                "Tôi cần nước",
+                "Tôi cần đi vệ sinh",
+                "Tôi cần hút đờm",
+                "Xin hãy đổi tư thế cho tôi",
             ),
         }
         for language, texts in samples.items():
@@ -237,6 +251,8 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(phrases_path("es").name, "phrases.es.json")
         self.assertEqual(phrases_path("zh").name, "phrases.zh.json")
         self.assertEqual(phrases_path("ru").name, "phrases.ru.json")
+        self.assertEqual(phrases_path("hi").name, "phrases.hi.json")
+        self.assertEqual(phrases_path("vi").name, "phrases.vi.json")
         english = load_phrases()
         translated = {
             "categories": english["categories"],
@@ -274,7 +290,12 @@ class ProfileTests(unittest.TestCase):
 
     def test_saved_profile_stays_english_while_zh_and_ru_can_be_selected(self) -> None:
         saved = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
-        samples = {"zh": "我需要水", "ru": "Мне нужна вода"}
+        samples = {
+            "zh": "我需要水",
+            "ru": "Мне нужна вода",
+            "hi": "मुझे पानी चाहिए",
+            "vi": "Tôi cần nước",
+        }
         self.assertEqual(saved["language"], "en")
         for language, text in samples.items():
             with self.subTest(language=language):

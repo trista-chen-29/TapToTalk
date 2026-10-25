@@ -48,6 +48,8 @@ class ClipJobTests(unittest.TestCase):
         samples = {
             "zh": ("我需要水", "请叫护士"),
             "ru": ("Мне нужна вода", "Позовите медсестру"),
+            "hi": ("मुझे पानी चाहिए", "नर्स को बुलाइए"),
+            "vi": ("Tôi cần nước", "Gọi y tá"),
         }
         for language, (water, nurse) in samples.items():
             with self.subTest(language=language):
@@ -195,6 +197,8 @@ class SpanishClipCommandTests(unittest.TestCase):
         samples = {
             "zh": ("我需要水", "请叫护士"),
             "ru": ("Мне нужна вода", "Позовите медсестру"),
+            "hi": ("मुझे पानी चाहिए", "नर्स को बुलाइए"),
+            "vi": ("Tôi cần nước", "Gọi y tá"),
         }
         for language, (water, nurse) in samples.items():
             with self.subTest(language=language):

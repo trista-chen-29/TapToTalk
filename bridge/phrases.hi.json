@@ -1,0 +1,21 @@
+{
+  "categories": ["needs", "pain_comfort", "people", "yes_no"],
+  "phrases": [
+    {"id": "need_water", "text": "मुझे पानी चाहिए", "category": "needs"},
+    {"id": "need_bathroom", "text": "मुझे शौचालय जाना है", "category": "needs"},
+    {"id": "need_suction", "text": "मुझे सक्शन चाहिए", "category": "needs"},
+    {"id": "need_position", "text": "कृपया मेरी स्थिति बदलें", "category": "needs"},
+    {"id": "pain_here", "text": "मुझे दर्द हो रहा है", "category": "pain_comfort"},
+    {"id": "pain_medicine", "text": "मुझे दर्द की दवा चाहिए", "category": "pain_comfort"},
+    {"id": "comfort_hot", "text": "मुझे बहुत गर्मी लग रही है", "category": "pain_comfort"},
+    {"id": "comfort_cold", "text": "मुझे बहुत ठंड लग रही है", "category": "pain_comfort"},
+    {"id": "person_nurse", "text": "नर्स को बुलाइए", "category": "people"},
+    {"id": "person_family", "text": "कृपया मेरे परिवार को बुलाइए", "category": "people"},
+    {"id": "person_doctor", "text": "मुझे डॉक्टर से मिलना है", "category": "people"},
+    {"id": "person_thanks", "text": "धन्यवाद", "category": "people"},
+    {"id": "yes_yes", "text": "हाँ", "category": "yes_no"},
+    {"id": "yes_no", "text": "नहीं", "category": "yes_no"},
+    {"id": "yes_not_sure", "text": "मुझे यकीन नहीं है", "category": "yes_no"},
+    {"id": "yes_repeat", "text": "कृपया फिर से कहिए", "category": "yes_no"}
+  ]
+}
