@@ -1,6 +1,6 @@
 # CONTRACT.md: TapToTalk module interfaces
 
-Version: v1.6 (2026-10-25)
+Version: v1.7 (2026-10-25)
 
 Owners: firmware and bridge (Person 1), web and storage (Person 2), ai (Person 3).
 
@@ -8,6 +8,7 @@ This file is the source of truth for every message that crosses a module boundar
 
 ## Changelog
 
+- v1.7: a dashboard WebSocket (`?client=dashboard`) receives a `history` message with the newest stored alerts and selections (FR7). Times stay ISO 8601 UTC. No acknowledgement message.
 - v1.6: the bridge plays `cat_<category>.wav` when the highlighted category changes (FR12). A missing clip stays silent. Category highlights never call Cartesia.
 - v1.5: the bridge calls `rank_phrases` when a category is highlighted (FR8). Catalog order stays on screen when ranking is not ready, fails, or the highlight has moved (FR9).
 - v1.4: removed the Fetch.ai agent. Nurse alerts are bridge logic in bridge/main.py, with no external service. The ai module covers only Claude and Cartesia.
@@ -176,6 +177,25 @@ Alert message, sent when a nurse call or a no-activity alert is raised:
 
 `kind` is `nurse_call` or `no_activity`. For `no_activity`, `phrase_id` is `null`.
 
+The nurse dashboard opens `ws://localhost:8765/?client=dashboard`. A patient page stays on `ws://localhost:8765/`. After the state snapshot, a dashboard connection receives one history message. A patient connection does not.
+
+```json
+{
+  "type": "history",
+  "alerts": [
+    {"type": "alert", "kind": "nurse_call", "phrase_id": "person_nurse", "timestamp": "2026-10-24T02:15:00Z"}
+  ],
+  "selections": [
+    {"phrase_id": "need_water", "category": "needs", "source": "keyboard", "selected_at": "2026-10-24T02:15:00Z"}
+  ]
+}
+```
+
+- `alerts` holds at most 30 alert messages, newest first. `nurse_call` uses `phrase_id` `person_nurse`. `no_activity` uses `phrase_id` `null`. `timestamp` is ISO 8601 UTC, the same value stored as `created_at`.
+- `selections` holds at most 30 rows, newest first. Each object has only `phrase_id`, `category`, `source`, and `selected_at`. `selected_at` is ISO 8601 UTC.
+- The history message has no name, date of birth, room number, phrase text, or free patient text.
+- The browser shows these UTC timestamps in the laptop's local time zone.
+
 UI to bridge, sent when a person presses Speak or clicks a phrase:
 
 ```json
@@ -278,6 +298,8 @@ Table `alerts`:
 | `acknowledged` | INTEGER | 0 or 1 |
 
 `save_selection(phrase_id, category, source)` writes one `selections` row. It does not write alert rows.
+
+`save_alert(kind)` writes one `alerts` row when the bridge raises `nurse_call` or `no_activity`. `created_at` is the UTC timestamp on that alert message. `escalated` and `acknowledged` stay 0. An alert suppressed by the 60-second dedupe rule is not written. The dashboard reads the newest 30 alert rows and the newest 30 selection rows from this file on the laptop. Nothing in the log is uploaded.
 
 "Frequent asks" for the ranker come from `selections`, the last 30 days only, when that calculation is in scope. No table stores names or identifiers. `profile_id` is not stored in either table. The v1.1 ranker input contains only the last five selections. Do not add fields silently.
 

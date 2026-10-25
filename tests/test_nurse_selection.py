@@ -24,10 +24,13 @@ class NurseSelectionTests(unittest.IsolatedAsyncioTestCase):
             "bridge.main.save_selection",
             side_effect=partial(log.save_selection, db_path=self.db_path),
         )
+        alert = patch("bridge.main.save_alert", return_value=1)
         speech = patch("bridge.main.speak")
         self.save = save.start()
+        self.alert = alert.start()
         self.speak = speech.start()
         self.addCleanup(save.stop)
+        self.addCleanup(alert.stop)
         self.addCleanup(speech.stop)
         self.app = create_app()
         self.runtime = self.app[RUNTIME]

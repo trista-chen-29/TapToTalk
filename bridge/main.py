@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import time
 from collections import Counter
 from collections.abc import Callable
@@ -20,7 +21,15 @@ from ai.rank import rank_phrases
 from ai.speak import speak, speak_category, stop_category_audio
 from bridge.commands import cfg_hold_ms
 from bridge.keyboard import KeyboardLink
-from bridge.log import recent_phrase_ids, save_selection, utc_now
+from bridge.log import (
+    HISTORY_LIMIT,
+    recent_alerts,
+    recent_phrase_ids,
+    recent_selections,
+    save_alert,
+    save_selection,
+    utc_now,
+)
 from bridge.phrases import CALL_NURSE_ID, Catalog, Phrase, load_phrases
 from bridge.profile import Profile, load_profile
 from bridge.serial_link import SerialLink
@@ -32,6 +41,7 @@ WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 LOOP_TICK_S = 0.1
 LED_RESEND_S = 5.0
 NURSE_CALL_DEDUPE_S = 60.0
+_UTC_STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 # serial_link.py queues Pico input as "tap". keyboard.py queues "keyboard".
 _LOG_SOURCES = {
     "tap": "tap",
@@ -126,6 +136,73 @@ def copy_state(state: State) -> State:
     }
 
 
+def _store_alert(kind: str, created_at: str) -> None:
+    """Persist one raised alert. A storage failure must not block the broadcast."""
+    try:
+        save_alert(kind, created_at=created_at)
+    except Exception:
+        logger.warning("could not store %s alert", kind)
+
+
+def _history_alert(row: dict[str, str]) -> dict[str, object] | None:
+    """Turn one stored alert into the section 7 alert message."""
+    kind = row["kind"]
+    stamp = row["created_at"]
+    if _UTC_STAMP.fullmatch(stamp) is None:
+        return None
+    if kind == "nurse_call":
+        phrase_id: str | None = CALL_NURSE_ID
+    elif kind == "no_activity":
+        phrase_id = None
+    else:
+        return None
+    return {
+        "type": "alert",
+        "kind": kind,
+        "phrase_id": phrase_id,
+        "timestamp": stamp,
+    }
+
+
+def _history_selection(row: dict[str, str]) -> dict[str, str] | None:
+    """Copy the four selection fields. Drop a row with a bad timestamp."""
+    selected_at = row["selected_at"]
+    if _UTC_STAMP.fullmatch(selected_at) is None:
+        return None
+    return {
+        "phrase_id": row["phrase_id"],
+        "category": row["category"],
+        "source": row["source"],
+        "selected_at": selected_at,
+    }
+
+
+def dashboard_history() -> dict[str, object]:
+    """Newest stored alerts and selections for one dashboard connection.
+
+    CONTRACT.md section 7. Times stay ISO 8601 UTC. No phrase text.
+    """
+    alerts: list[dict[str, object]] = []
+    selections: list[dict[str, str]] = []
+    try:
+        for row in recent_alerts(HISTORY_LIMIT):
+            message = _history_alert(row)
+            if message is not None:
+                alerts.append(message)
+    except Exception:
+        logger.warning("could not read stored alerts")
+        alerts = []
+    try:
+        for row in recent_selections(HISTORY_LIMIT):
+            message = _history_selection(row)
+            if message is not None:
+                selections.append(message)
+    except Exception:
+        logger.warning("could not read stored selections")
+        selections = []
+    return {"type": "history", "alerts": alerts, "selections": selections}
+
+
 async def index(request: web.Request) -> web.StreamResponse:
     """Serve the patient page, or upgrade to a WebSocket at the same URL."""
     socket = web.WebSocketResponse(heartbeat=30)
@@ -142,12 +219,15 @@ async def index(request: web.Request) -> web.StreamResponse:
     ):
         raise web.HTTPForbidden(text="Open the page from the local bridge.")
 
+    dashboard = request.query.get("client") == "dashboard"
     await socket.prepare(request)
     runtime = request.app[RUNTIME]
     try:
         async with runtime.publish_lock:
             runtime.sockets.add(socket)
             await socket.send_json(runtime.machine.snapshot())
+            if dashboard:
+                await socket.send_json(dashboard_history())
         async for message in socket:
             # Speak and phrase clicks arrive as JSON text. CONTRACT.md section 7.
             if message.type != WSMsgType.TEXT:
@@ -351,13 +431,15 @@ async def publish_nurse_call(
     if last_sent is not None and now - last_sent < NURSE_CALL_DEDUPE_S:
         return
     runtime.last_nurse_call_at = now
+    timestamp = utc_now()
+    _store_alert("nurse_call", timestamp)
     await broadcast(
         runtime,
         {
             "type": "alert",
             "kind": "nurse_call",
             "phrase_id": phrase_id,
-            "timestamp": utc_now(),
+            "timestamp": timestamp,
         },
     )
 
@@ -704,13 +786,15 @@ async def publish_no_activity(app: web.Application, now: float) -> None:
             return
         runtime.no_activity_sent = True
         logger.info("no_activity")
+        timestamp = utc_now()
+        _store_alert("no_activity", timestamp)
         await broadcast(
             runtime,
             {
                 "type": "alert",
                 "kind": "no_activity",
                 "phrase_id": None,
-                "timestamp": utc_now(),
+                "timestamp": timestamp,
             },
         )
 
