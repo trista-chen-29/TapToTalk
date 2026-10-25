@@ -22,11 +22,12 @@ SERIAL_PORT_ENV = "TAPTOTALK_SERIAL_PORT"
 BAUD = 115200
 READ_TIMEOUT_S = 0.2
 RETRY_S = 1.0
+MAX_SERIAL_LINE_BYTES = 64
 SERIAL_EVENTS = frozenset({"TAP", "HOLD", "HOLD_LONG", "SELECT"})
 
 
 class SerialPort(Protocol):
-    def readline(self) -> bytes: ...
+    def readline(self, size: int = -1) -> bytes: ...
 
     def write(self, data: bytes) -> int: ...
 
@@ -68,6 +69,7 @@ def open_serial(port_name: str) -> serial.Serial:
         baudrate=BAUD,
         timeout=READ_TIMEOUT_S,
         write_timeout=READ_TIMEOUT_S,
+        exclusive=True,
     )
 
 
@@ -170,39 +172,64 @@ class SerialLink:
                 self._read(port)
             finally:
                 with self._io_lock:
-                    if self._port is port:
+                    owns_port = self._port is port
+                    if owns_port:
                         self._port = None
-                try:
-                    port.close()
-                except Exception:
-                    logger.warning("could not close serial port")
+                # close() takes ownership when shutdown interrupts a read.
+                # Do not concurrently close the same descriptor twice.
+                if owns_port:
+                    try:
+                        port.close()
+                    except Exception:
+                        logger.warning("could not close serial port")
             if self._stop.wait(RETRY_S):
                 return
 
     def _read(self, port: SerialPort) -> None:
+        pending = bytearray()
+        discard_line = False
         while not self._stop.is_set():
             with self._io_lock:
                 if self._port is not port:
                     return
-                try:
-                    raw = port.readline()
-                except Exception:
+            # Serial is full duplex. A blocking read must not own the write/close
+            # lock: the bridge sends CFG and LED commands even with no input.
+            try:
+                raw = port.readline(MAX_SERIAL_LINE_BYTES + 1)
+            except Exception:
+                if not self._stop.is_set():
                     logger.warning("serial read failed")
-                    return
+                return
             if not raw:
                 continue
-            try:
-                text = raw.decode("ascii")
-            except UnicodeDecodeError:
-                logger.info("ignored non-ascii serial line")
-                continue
-            event = accept_line(text)
-            if event is None:
-                shown = text.strip("\r\n")
-                if shown:
-                    logger.info("ignored serial line %s", shown[:80])
-                continue
+            # readline() may return a partial line when its timeout expires.
+            # Wait for LF, including when a chunk happens to be exactly HOLD:
+            # the remaining bytes may be _LONG rather than a separate event.
+            for byte in raw:
+                if byte == 10:
+                    if not discard_line:
+                        self._accept_complete_line(pending)
+                    pending.clear()
+                    discard_line = False
+                elif not discard_line:
+                    if len(pending) >= MAX_SERIAL_LINE_BYTES:
+                        pending.clear()
+                        discard_line = True
+                        logger.info("ignored oversized serial line")
+                    else:
+                        pending.append(byte)
+
+    def _accept_complete_line(self, raw: bytearray) -> None:
+        try:
+            text = raw.decode("ascii")
+        except UnicodeDecodeError:
+            logger.info("ignored non-ascii serial line")
+            return
+        event = accept_line(text)
+        if event is not None:
             self._emit(event)
+        elif text.strip("\r\n"):
+            logger.info("ignored unknown serial line")
 
     def _emit(self, event: str) -> None:
         try:

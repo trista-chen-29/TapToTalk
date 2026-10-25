@@ -159,6 +159,7 @@ def create_app() -> web.Application:
     app = web.Application()
     app[RUNTIME] = runtime
     app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
     app.on_cleanup.append(on_cleanup)
     app.router.add_get("/", index)
     # Fixed filenames avoid exposing profiles, logs, secrets, or source files.
@@ -184,6 +185,16 @@ async def on_startup(app: web.Application) -> None:
     keyboard = KeyboardLink(loop, runtime.events, runtime.profile["hold_ms"])
     runtime.keyboard = keyboard
     keyboard.start()
+
+
+async def on_shutdown(app: web.Application) -> None:
+    """Close browser sockets so shutdown can promptly release the Pico port."""
+    await asyncio.gather(
+        *(
+            socket.close(code=1001, message=b"Bridge stopping")
+            for socket in tuple(app[RUNTIME].sockets)
+        )
+    )
 
 
 async def on_cleanup(app: web.Application) -> None:

@@ -1,8 +1,9 @@
 """Exercise real HTTP and WebSocket connections to the local bridge."""
 
+import asyncio
 import unittest
 
-from aiohttp import WSServerHandshakeError
+from aiohttp import WSMsgType, WSServerHandshakeError
 from aiohttp.test_utils import TestClient, TestServer
 
 from bridge.main import create_app
@@ -41,6 +42,14 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                         "phrases": [],
                     },
                 )
+
+    async def test_shutdown_closes_connected_browser_sockets(self) -> None:
+        socket = await self.client.ws_connect("/")
+        await socket.receive_json(timeout=2)
+        await asyncio.wait_for(self.client.server.app.shutdown(), timeout=2)
+        message = await socket.receive(timeout=2)
+        self.assertEqual(message.type, WSMsgType.CLOSE)
+        self.assertEqual(message.data, 1001)
 
     async def test_private_files_are_not_served(self) -> None:
         for path in ("/.env", "/bridge/profile.json", "/CONTRACT.md"):
