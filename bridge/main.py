@@ -18,7 +18,7 @@ from ai.speak import speak
 from bridge.commands import cfg_hold_ms
 from bridge.keyboard import KeyboardLink
 from bridge.log import save_selection, utc_now
-from bridge.phrases import Catalog, Phrase, load_phrases
+from bridge.phrases import CALL_NURSE_ID, Catalog, Phrase, load_phrases
 from bridge.profile import Profile, load_profile
 from bridge.serial_link import SerialLink
 from bridge.state import Effect, Machine, NurseCall, Selected, State
@@ -301,6 +301,29 @@ async def _speak(phrase_id: str, text: str) -> None:
         logger.warning("speech failed phrase_id=%s", phrase_id)
 
 
+async def publish_nurse_call(
+    runtime: Runtime, phrase_id: str, source: str, now: float
+) -> None:
+    """Use the same nurse-call broadcast and dedupe window for every source.
+
+    Called under publish_lock, before selection logging or audio can fail.
+    """
+    logger.info("nurse_call phrase_id=%s source=%s", phrase_id, source)
+    last_sent = runtime.last_nurse_call_at
+    if last_sent is not None and now - last_sent < NURSE_CALL_DEDUPE_S:
+        return
+    runtime.last_nurse_call_at = now
+    await broadcast(
+        runtime,
+        {
+            "type": "alert",
+            "kind": "nurse_call",
+            "phrase_id": phrase_id,
+            "timestamp": utc_now(),
+        },
+    )
+
+
 async def publish(
     app: web.Application,
     state: State,
@@ -332,28 +355,14 @@ async def publish(
                             effect.phrase_id,
                         )
                     else:
+                        if effect.phrase_id == CALL_NURSE_ID:
+                            await publish_nurse_call(
+                                runtime, effect.phrase_id, effect.source, now
+                            )
                         save_selection(effect.phrase_id, phrase["category"], source)
                         await _speak(effect.phrase_id, phrase["text"])
             elif isinstance(effect, NurseCall):
-                logger.info(
-                    "nurse_call phrase_id=%s source=%s",
-                    effect.phrase_id,
-                    effect.source,
-                )
-                # `now` is monotonic, from Runtime.clock. The message time is UTC.
-                last_sent = runtime.last_nurse_call_at
-                if last_sent is not None and now - last_sent < NURSE_CALL_DEDUPE_S:
-                    continue
-                runtime.last_nurse_call_at = now
-                await broadcast(
-                    runtime,
-                    {
-                        "type": "alert",
-                        "kind": "nurse_call",
-                        "phrase_id": effect.phrase_id,
-                        "timestamp": utc_now(),
-                    },
-                )
+                await publish_nurse_call(runtime, effect.phrase_id, effect.source, now)
             elif isinstance(effect, str):
                 send_led(runtime, effect, now)
         if state != runtime.last_state:
