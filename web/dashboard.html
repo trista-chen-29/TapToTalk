@@ -27,7 +27,7 @@
       </section>
       <!-- Announce each new alert through this dedicated region, not the whole list. -->
       <p class="note" id="dashboard-message" role="status" aria-live="polite" aria-atomic="true">Waiting for alerts.</p>
-      <aside class="info-callout"><p class="note">This tab shows only alerts received while open. Reloading clears this view; missed alerts are not recovered. Acknowledgement and escalation updates are not connected.</p></aside>
+      <aside class="info-callout"><p class="note">This tab shows only alerts received while open. Reloading clears this view; missed alerts are not recovered. Acknowledgement is not connected.</p></aside>
       <nav class="nav" aria-label="Other view"><a class="secondary-link" href="index.html"><span aria-hidden="true">←</span> Patient screen</a></nav>
     </main>
     <script>
@@ -40,6 +40,7 @@
       const list = document.getElementById("alert-list");
       const feedback = document.getElementById("dashboard-message");
       const received = new Set();
+      const cards = new Map();
       let total = 0;
 
       function renderAlert(alert) {
@@ -51,12 +52,20 @@
           /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(stamp) &&
           Number.isFinite(Date.parse(stamp)) &&
           new Date(stamp).toISOString() === (stamp.includes(".") ? stamp : stamp.replace("Z", ".000Z"));
-        if (!validKind || !validTime) {
+        if (!validKind || !validTime || ("escalated" in alert && alert.escalated !== true)) {
           feedback.textContent = "An invalid alert was ignored. Existing alerts are unchanged.";
           return;
         }
-        // Suppress only exact event replays. The agent owns the 60-second dedupe rule.
+        // Suppress only exact event replays. The bridge owns dedupe and escalation.
         const key = JSON.stringify([alert.kind, new Date(stamp).toISOString()]);
+        if (alert.escalated === true) {
+          const card = cards.get(key);
+          if (!card) return;
+          card.item.setAttribute("data-status", "escalated");
+          card.status.textContent = "This alert was escalated. Acknowledgement status unavailable.";
+          feedback.textContent = `Alert escalated: ${card.label}.`;
+          return;
+        }
         if (received.has(key)) return;
         received.add(key);
         total += 1;
@@ -78,6 +87,7 @@
         const status = document.createElement("p");
         status.textContent = "Received in this tab. Acknowledgement status unavailable.";
         item.append(heading, time, status);
+        cards.set(key, { item, status, label: heading.textContent });
         list.prepend(item);
         empty.hidden = true;
         summary.textContent = `${total} alert${total === 1 ? "" : "s"} received in this tab.`;

@@ -32,6 +32,7 @@ WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 LOOP_TICK_S = 0.1
 LED_RESEND_S = 5.0
 NURSE_CALL_DEDUPE_S = 60.0
+ALERT_ESCALATE_S = 120.0
 # serial_link.py queues Pico input as "tap". keyboard.py queues "keyboard".
 _LOG_SOURCES = {
     "tap": "tap",
@@ -67,6 +68,17 @@ class KeyboardSink(Protocol):
 
 
 @dataclass
+class RaisedAlert:
+    """One alert already sent to the dashboard."""
+
+    kind: str
+    phrase_id: str | None
+    timestamp: str
+    raised_at: float
+    escalated: bool = False
+
+
+@dataclass
 class Runtime:
     """Mutable bridge state. Kept off the app mapping so it can change later."""
 
@@ -88,6 +100,7 @@ class Runtime:
     last_nurse_call_at: float | None = None
     last_input_at: float = 0.0
     no_activity_sent: bool = False
+    raised_alerts: list[RaisedAlert] = field(default_factory=list)
     clock: Callable[[], float] = time.monotonic
     rank_phrases: Ranker | None = None
     speak_category: Callable[[str], None] | None = None
@@ -351,15 +364,7 @@ async def publish_nurse_call(
     if last_sent is not None and now - last_sent < NURSE_CALL_DEDUPE_S:
         return
     runtime.last_nurse_call_at = now
-    await broadcast(
-        runtime,
-        {
-            "type": "alert",
-            "kind": "nurse_call",
-            "phrase_id": phrase_id,
-            "timestamp": utc_now(),
-        },
-    )
+    await _broadcast_alert(runtime, kind="nurse_call", phrase_id=phrase_id, now=now)
 
 
 async def publish(
@@ -413,6 +418,59 @@ async def publish(
                 state["category"],
             )
             await broadcast(runtime, runtime.last_state)
+
+
+async def _broadcast_alert(
+    runtime: Runtime,
+    *,
+    kind: str,
+    phrase_id: str | None,
+    now: float,
+) -> None:
+    """Send one new alert and remember it until it escalates."""
+    timestamp = utc_now()
+    runtime.raised_alerts.append(
+        RaisedAlert(
+            kind=kind,
+            phrase_id=phrase_id,
+            timestamp=timestamp,
+            raised_at=now,
+        )
+    )
+    await broadcast(
+        runtime,
+        {
+            "type": "alert",
+            "kind": kind,
+            "phrase_id": phrase_id,
+            "timestamp": timestamp,
+        },
+    )
+
+
+async def publish_escalations(app: web.Application, now: float) -> None:
+    """Mark each broadcast alert escalated once two minutes have passed.
+
+    No acknowledgement message is defined, so every remembered alert
+    escalates. The dashboard update reuses that alert's kind, phrase id,
+    and timestamp. CONTRACT.md section 7.
+    """
+    runtime = app[RUNTIME]
+    async with runtime.publish_lock:
+        for alert in runtime.raised_alerts:
+            if alert.escalated or now - alert.raised_at < ALERT_ESCALATE_S:
+                continue
+            alert.escalated = True
+            await broadcast(
+                runtime,
+                {
+                    "type": "alert",
+                    "kind": alert.kind,
+                    "phrase_id": alert.phrase_id,
+                    "timestamp": alert.timestamp,
+                    "escalated": True,
+                },
+            )
 
 
 async def broadcast(runtime: Runtime, payload: dict[str, object]) -> None:
@@ -704,15 +762,7 @@ async def publish_no_activity(app: web.Application, now: float) -> None:
             return
         runtime.no_activity_sent = True
         logger.info("no_activity")
-        await broadcast(
-            runtime,
-            {
-                "type": "alert",
-                "kind": "no_activity",
-                "phrase_id": None,
-                "timestamp": utc_now(),
-            },
-        )
+        await _broadcast_alert(runtime, kind="no_activity", phrase_id=None, now=now)
 
 
 async def run_once(app: web.Application) -> None:
@@ -729,6 +779,7 @@ async def run_once(app: web.Application) -> None:
     state, effects = runtime.machine.tick(now)
     await publish(app, state, effects, now)
     await publish_no_activity(app, now)
+    await publish_escalations(app, now)
     if led_resend_due(now, runtime.last_state_change, runtime.last_led_send):
         send_led(runtime, runtime.last_led, now)
 

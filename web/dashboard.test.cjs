@@ -27,7 +27,10 @@ function setup() {
     send(value) { this.sent.push(value); }
   }
   vm.runInNewContext(script, {
-    document: { getElementById: id => elements[id], createElement: () => new Element() },
+    document: {
+      getElementById: id => elements[id],
+      createElement: tag => { const el = new Element(); el.tagName = tag; return el; },
+    },
     WebSocket: Socket,
     Date: TestDate,
     window: { location: { host: 'localhost:8765' }, setTimeout: fn => timers.push(fn) },
@@ -95,6 +98,7 @@ test('invalid kinds, phrase IDs, missing fields, and timestamps cannot create al
     {...alert(), timestamp: 'not a date'}, {...alert(), timestamp: '2026-02-30T02:15:00Z'},
     {...alert(), timestamp: '2026-10-24T02:15:00'}, {type: 'alert'},
     {...alert(), timestamp: '<img src=x>'},
+    {...alert(), escalated: false}, {...alert(), escalated: 1}, {...alert(), escalated: 'true'},
   ]) receive(value);
   assert.equal(elements['alert-list'].children.length, 1);
   assert.match(elements['dashboard-message'].textContent, /invalid alert/);
@@ -135,20 +139,44 @@ test('never renders arbitrary payload text or identifying extra fields', () => {
 });
 
 
-test('two-minute boundary documents blocked escalation without fabricating status', () => {
+test('escalation updates the same card and does not add a control or timer', () => {
   const { elements, receive, alert, clock, timers } = setup();
-  receive(alert('nurse_call', '2026-10-24T02:15:00Z'));
+  receive(alert());
+  receive(alert('no_activity', '2026-10-24T02:20:00Z'));
+  const quiet = elements['alert-list'].children[0];
+  const nurse = elements['alert-list'].children[1];
   const raisedAt = clock.now;
-  const card = elements['alert-list'].children[0];
   for (const elapsed of [119999, 120000, 120001]) {
     clock.now = raisedAt + elapsed;
-    // Replaying the ONLY existing contract message is not an escalation update.
-    // There is no bridge timer or acknowledgement/escalation protocol to invoke.
-    receive(alert('nurse_call', '2026-10-24T02:15:00Z'));
-    assert.equal(elements['alert-list'].children.length, 1);
-    assert.equal(card.children[0].textContent, 'Call nurse');
-    assert.equal(card.children[2].textContent,
+    // The dashboard clock does not escalate. Only the bridge update does.
+    receive(alert());
+    assert.equal(elements['alert-list'].children.length, 2);
+    assert.equal(nurse.children[2].textContent,
       'Received in this tab. Acknowledgement status unavailable.');
     assert.equal(timers.length, 0);
   }
+  receive({...alert(), escalated: true});
+  assert.equal(elements['alert-list'].children.length, 2);
+  assert.equal(elements['alert-summary'].textContent, '2 alerts received in this tab.');
+  assert.equal(nurse.children[0].textContent, 'Call nurse');
+  assert.equal(nurse.children[1].attributes.datetime, '2026-10-24T02:15:00Z');
+  assert.equal(nurse.children.length, 3);
+  assert.equal(nurse.children[2].textContent,
+    'This alert was escalated. Acknowledgement status unavailable.');
+  assert.equal(nurse.attributes['data-status'], 'escalated');
+  assert.ok(nurse.children.every(child => child.tagName !== 'button'));
+  assert.equal(quiet.children[2].textContent,
+    'Received in this tab. Acknowledgement status unavailable.');
+  assert.equal(timers.length, 0);
+  receive({...alert('no_activity', '2026-10-24T02:20:00Z'), escalated: true});
+  assert.equal(elements['alert-list'].children.length, 2);
+  assert.equal(quiet.children[2].textContent,
+    'This alert was escalated. Acknowledgement status unavailable.');
+  assert.equal(elements['alert-summary'].textContent, '2 alerts received in this tab.');
+  const before = elements['dashboard-message'].textContent;
+  receive({...alert('nurse_call', '2026-10-24T04:00:00Z'), escalated: true});
+  assert.equal(elements['alert-list'].children.length, 2);
+  assert.equal(elements['alerts-empty'].hidden, true);
+  assert.equal(elements['dashboard-message'].textContent, before);
+  assert.doesNotMatch(html, /<button/i);
 });
