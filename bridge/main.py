@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import time
 from collections.abc import Callable
@@ -11,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from aiohttp import web
+from aiohttp import WSMsgType, web
 
 from ai.speak import speak
 from bridge.commands import cfg_hold_ms
@@ -125,10 +126,11 @@ async def index(request: web.Request) -> web.StreamResponse:
         async with runtime.publish_lock:
             runtime.sockets.add(socket)
             await socket.send_json(runtime.machine.snapshot())
-        async for _message in socket:
-            # UI select messages are not applied yet. Sensor and keyboard
-            # events enter through the serial link and the keyboard listener.
-            pass
+        async for message in socket:
+            # Speak and phrase clicks arrive as JSON text. CONTRACT.md section 7.
+            if message.type != WSMsgType.TEXT:
+                continue
+            apply_ui_select(runtime, message.data)
     finally:
         runtime.sockets.discard(socket)
     return socket
@@ -227,6 +229,55 @@ def send_led(runtime: Runtime, command: str, now: float) -> None:
     runtime.last_led_send = now
     if runtime.serial is not None:
         runtime.serial.send(command)
+
+
+def apply_ui_select(runtime: Runtime, raw: str) -> None:
+    """Queue SELECT when the page confirms the highlighted phrase.
+
+    CONTRACT.md section 7. A message that does not match is ignored.
+    """
+    try:
+        _apply_ui_select(runtime, raw)
+    except Exception:
+        logger.warning("ignored UI select")
+
+
+def _apply_ui_select(runtime: Runtime, raw: str) -> None:
+    """Accept one UI select, or log a warning and leave the queue unchanged."""
+    if not isinstance(raw, str):
+        logger.warning("ignored UI message that is not JSON")
+        return
+    try:
+        message = json.loads(raw)
+    except ValueError:
+        logger.warning("ignored UI message that is not JSON")
+        return
+    if not isinstance(message, dict):
+        logger.warning("ignored UI message")
+        return
+    if message.get("type") != "select" or message.get("source") != "ui":
+        logger.warning("ignored UI message")
+        return
+
+    phrase_id = message.get("phrase_id")
+    if (
+        not isinstance(phrase_id, str)
+        or _catalog_phrase(runtime.catalog, phrase_id) is None
+    ):
+        logger.warning("ignored UI select for an unknown phrase")
+        return
+
+    snapshot = runtime.machine.snapshot()
+    if snapshot["mode"] != "phrase":
+        logger.warning("ignored UI select outside phrase mode")
+        return
+    phrases = snapshot["phrases"]
+    index = snapshot["highlight_index"]
+    highlighted = phrases[index]["id"] if 0 <= index < len(phrases) else None
+    if phrase_id != highlighted:
+        logger.warning("ignored UI select for a phrase that is not highlighted")
+        return
+    runtime.events.put_nowait(("SELECT", "ui"))
 
 
 def _catalog_phrase(catalog: Catalog, phrase_id: str) -> Phrase | None:
