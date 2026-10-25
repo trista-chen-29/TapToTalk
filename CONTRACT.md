@@ -1,6 +1,6 @@
 # CONTRACT.md: TapToTalk module interfaces
 
-Version: v1.4 (2026-10-25)
+Version: v1.5 (2026-10-25)
 
 Owners: firmware and bridge (Person 1), web and storage (Person 2), ai (Person 3).
 
@@ -8,6 +8,7 @@ This file is the source of truth for every message that crosses a module boundar
 
 ## Changelog
 
+- v1.5: the bridge calls `rank_phrases` when a category is highlighted (FR8). Catalog order stays on screen when ranking is not ready, fails, or the highlight has moved (FR9).
 - v1.4: removed the Fetch.ai agent. Nurse alerts are bridge logic in bridge/main.py, with no external service. The ai module covers only Claude and Cartesia.
 - v1.3: a `TAP` in idle is ignored (FR20). A session still starts on `HOLD`.
 - v1.2: added the `HOLD_LONG` message for the 3-second direct nurse call (FR19), its keyboard key, and the key switch pull-up wiring note.
@@ -201,14 +202,14 @@ Input (`context`) holds only these fields:
 
 - `time_of_day` is `morning`, `afternoon`, `evening`, or `night`.
 - `last_selections` holds at most 5 phrase ids, oldest first.
-- `candidates` must be ids from the phrase file. The stub returns them unchanged.
+- `candidates` must be ids from the phrase file, in catalog order.
 - Never send names, IDs, room numbers, dated timestamps, profile contents, or free text from the patient.
 
 Output: a list of phrase ids, ranked, containing exactly the candidate ids.
 
 Failure rule: if the call errors, times out after 3 seconds, or returns an id not in `candidates`, return `candidates` unchanged. Cache a successful ranking for 60 seconds, keyed on the input.
 
-The current stub returns `candidates` unchanged and does not call Claude.
+The bridge calls `rank_phrases` when a category is highlighted. Phrase mode uses that ranking when it is already ready. Otherwise the screen shows catalog order, then replaces it only while the highlight is still the first phrase. A failure, a timeout, an invalid list, or a highlight the patient has already moved leaves catalog order in place. Ranking never blocks a phrase choice or a nurse call.
 
 ## 9. Bridge to AI: speech (Cartesia)
 

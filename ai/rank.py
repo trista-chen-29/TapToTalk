@@ -56,10 +56,12 @@ def rank_phrases(
         raw = _call_with_deadline(client, payload)
         ranked = _accepted_order(raw, candidates)
         if ranked is None:
+            logger.warning("phrase ranking rejected the response")
             return candidates
         _store_ranking(payload, ranked, now)
         return list(ranked)
-    except Exception:
+    except Exception as exc:
+        logger.warning("phrase ranking failed: %s", type(exc).__name__)
         return candidates
 
 
@@ -163,6 +165,9 @@ def _invoke(client: object | None, payload: dict[str, object]) -> str:
     message = caller.messages.create(
         model=_model(),
         max_tokens=256,
+        # The model otherwise spends this whole budget thinking and returns
+        # no phrase list, which the ranker treats as a failure.
+        thinking={"type": "disabled"},
         messages=[{"role": "user", "content": _prompt(payload)}],
     )
     return _message_text(message)

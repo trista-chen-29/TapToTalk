@@ -12,7 +12,7 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
-from bridge.log import connect, save_selection
+from bridge.log import connect, recent_phrase_ids, save_selection
 from bridge.phrases import load_phrases
 
 
@@ -117,6 +117,26 @@ class RequestLogTests(unittest.TestCase):
         rows = self.selection_rows()
         self.assertEqual(len(rows), 2)
         self.assertNotEqual(rows[0]["id"], rows[1]["id"])
+
+    def test_recent_phrase_ids_are_oldest_first_and_capped_at_five(self) -> None:
+        self.assertEqual(recent_phrase_ids(db_path=self.db_path), [])
+        phrase_ids = [
+            "need_water",
+            "need_bathroom",
+            "need_suction",
+            "need_position",
+            "pain_here",
+            "person_nurse",
+        ]
+        catalog = {item["id"]: item["category"] for item in load_phrases()["phrases"]}
+        for phrase_id in phrase_ids:
+            save_selection(
+                phrase_id,
+                catalog[phrase_id],
+                "keyboard",
+                db_path=self.db_path,
+            )
+        self.assertEqual(recent_phrase_ids(5, db_path=self.db_path), phrase_ids[1:])
 
     def test_generated_selection_time_is_current_utc(self) -> None:
         before = datetime.now(UTC).replace(microsecond=0)

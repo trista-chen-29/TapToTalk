@@ -8,6 +8,7 @@ dependencies = [
     "aiohttp>=3.11,<4",
     "miniaudio>=1.71,<2",
     "python-dotenv>=1.2,<2",
+    "anthropic>=0.40,<1",
     "cartesia>=4.2,<5",
     "pyserial>=3.5,<4",
     "pynput",
