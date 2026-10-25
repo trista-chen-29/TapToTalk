@@ -1,12 +1,12 @@
 # AGENTS.md: TapToTalk working rules
 
-Version: v1.1 (2026-10-23)
+Version: v1.2 (2026-10-24)
 
 Read this before you write code, run an agent, or open a pull request. Humans and coding agents follow the same rules.
 
 ## What this repo is
 
-TapToTalk is a communication aid for intubated ICU patients. A patient taps a sensor to pick a phrase. The laptop bridge narrows the phrases, Claude re-ranks them, Cartesia speaks the choice, and Fetch.ai alerts the nurse on "Call nurse."
+TapToTalk is a communication aid for intubated ICU patients. A patient taps a sensor to pick a phrase. The laptop bridge narrows the phrases, Claude re-ranks them, Cartesia speaks the choice, and the laptop bridge alerts the nurse on "Call nurse."
 
 This is a hackathon build. It is not a medical device, and it has not been tested on patients. Do not write copy, comments, or docs that claim clinical use or outcomes.
 
@@ -17,10 +17,10 @@ Board: Raspberry Pico (chosen 2026-10-23). The ESP32 is a backup only.
 | Path | What it is | Owner |
 | --- | --- | --- |
 | `firmware/` | MicroPython for the Pico (touch, key switch, 3-colour LED) | Person 1 |
-| `bridge/` | Python laptop process: state machine, profile, request log | Person 1 |
+| `bridge/` | state machine, nurse alerts, profile, log | Person 1 |
 | `bridge/audio/` | Pre-generated phrase and category clips (`.wav`) | Person 1 |
 | `web/` | Browser UI and nurse dashboard | Person 2 |
-| `ai/` | Claude ranking, Cartesia speech, Fetch.ai nurse alerts | Person 3 |
+| `ai/` | Claude ranking, Cartesia speech | Person 3 |
 | `CONTRACT.md` | Interfaces between modules (source of truth), v1.1 | All three |
 | `AGENTS.md` | This file | All three |
 

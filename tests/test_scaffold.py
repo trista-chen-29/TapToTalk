@@ -9,7 +9,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ai.alert import send_alert
 from ai.hello import echo
 from ai.rank import rank_phrases
 from ai.speak import speak
@@ -97,14 +96,6 @@ class StubTests(unittest.TestCase):
                 os.environ.pop("CARTESIA_API_KEY", None)
             else:
                 os.environ["CARTESIA_API_KEY"] = previous
-        self.assertIsNone(
-            send_alert("nurse_call", "person_nurse", "2026-10-24T02:15:00Z")
-        )
-        self.assertIsNone(send_alert("no_activity", None, "2026-10-24T02:20:00Z"))
-
-    def test_alert_rejects_a_phrase_on_no_activity(self) -> None:
-        with self.assertRaises(ValueError):
-            send_alert("no_activity", "person_nurse", "2026-10-24T02:20:00Z")
 
 
 class LogTests(unittest.TestCase):

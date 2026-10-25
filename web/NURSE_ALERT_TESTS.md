@@ -5,7 +5,7 @@ handler, or new WebSocket message format is introduced.
 
 | Acceptance criterion | Result | Evidence / blocker |
 | --- | --- | --- |
-| Selecting Call nurse produces a dashboard nurse_call card | Blocked end to end; simulated rendering passes | Existing patient tests verify selection payload output. Existing dashboard tests feed contract alert JSON through a mock WebSocket and verify the card. bridge/main.py ignores input, bridge/alert.py does not exist, and ai/alert.py is a stub, so these two tested pieces are not connected. |
+| Selecting Call nurse produces a dashboard nurse_call card | Blocked end to end; simulated rendering passes | Existing patient tests verify selection payload output. Existing dashboard tests feed contract alert JSON through a mock WebSocket and verify the card. bridge/main.py ignores input, alerts are in bridge/main.py, and ai/alert.py is a stub, so these two tested pieces are not connected. |
 | Unacknowledged alert becomes escalated after two minutes | Blocked | No bridge escalation timer or acknowledgement handler exists, and v1.1 defines no escalation-update message. The dashboard explicitly reports acknowledgement status unavailable. |
 
 ## Focused simulation
