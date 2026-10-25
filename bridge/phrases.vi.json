@@ -1,0 +1,21 @@
+{
+  "categories": ["needs", "pain_comfort", "people", "yes_no"],
+  "phrases": [
+    {"id": "need_water", "text": "Tôi cần nước", "category": "needs"},
+    {"id": "need_bathroom", "text": "Tôi cần đi vệ sinh", "category": "needs"},
+    {"id": "need_suction", "text": "Tôi cần hút đờm", "category": "needs"},
+    {"id": "need_position", "text": "Xin hãy đổi tư thế cho tôi", "category": "needs"},
+    {"id": "pain_here", "text": "Tôi đang đau", "category": "pain_comfort"},
+    {"id": "pain_medicine", "text": "Tôi cần thuốc giảm đau", "category": "pain_comfort"},
+    {"id": "comfort_hot", "text": "Tôi thấy nóng quá", "category": "pain_comfort"},
+    {"id": "comfort_cold", "text": "Tôi thấy lạnh quá", "category": "pain_comfort"},
+    {"id": "person_nurse", "text": "Gọi y tá", "category": "people"},
+    {"id": "person_family", "text": "Xin hãy gọi gia đình tôi", "category": "people"},
+    {"id": "person_doctor", "text": "Tôi muốn gặp bác sĩ", "category": "people"},
+    {"id": "person_thanks", "text": "Cảm ơn", "category": "people"},
+    {"id": "yes_yes", "text": "Có", "category": "yes_no"},
+    {"id": "yes_no", "text": "Không", "category": "yes_no"},
+    {"id": "yes_not_sure", "text": "Tôi không chắc", "category": "yes_no"},
+    {"id": "yes_repeat", "text": "Xin hãy nói lại", "category": "yes_no"}
+  ]
+}

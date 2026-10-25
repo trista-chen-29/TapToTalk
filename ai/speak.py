@@ -32,6 +32,7 @@ _AUDIO_DIR = Path(__file__).resolve().parents[1] / "bridge" / "audio"
 _ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 _SECRET_RE = re.compile(r"sk_car_[A-Za-z0-9_-]+")
 _BEARER_RE = re.compile(r"Bearer\s+\S+", re.IGNORECASE)
+_LANGUAGE = re.compile(r"^[a-z]{2,8}$")
 
 
 def speak(phrase_id: str, text: str) -> None:
@@ -163,20 +164,22 @@ def _load_api_key() -> str | None:
     return key or None
 
 
-def synthesize(text: str) -> bytes:
+def synthesize(text: str, *, language: str = "en") -> bytes:
     """Return a WAV clip for catalog text. Sends that text and nothing else."""
     if not isinstance(text, str) or text == "":
         raise ValueError("text must be a non-empty string")
+    if not isinstance(language, str) or _LANGUAGE.fullmatch(language) is None:
+        raise ValueError("language must be a short lowercase code such as en")
     api_key = _load_api_key()
     if api_key is None:
         raise RuntimeError("CARTESIA_API_KEY is not set")
     try:
-        return _synthesize(api_key, text)
+        return _synthesize(api_key, text, language)
     except Exception as exc:
         raise RuntimeError(_public_reason(exc, api_key, text)) from None
 
 
-def _synthesize(api_key: str, text: str) -> bytes:
+def _synthesize(api_key: str, text: str, language: str = "en") -> bytes:
     """Request one WAV clip. The phrase id is not sent."""
     from cartesia import Cartesia
 
@@ -185,7 +188,7 @@ def _synthesize(api_key: str, text: str) -> bytes:
             model_id=MODEL_ID,
             transcript=text,
             voice=VOICE_ID,
-            language="en",
+            language=language,
             output_format={
                 "container": "wav",
                 "encoding": "pcm_s16le",

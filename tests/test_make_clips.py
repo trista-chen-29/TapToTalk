@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ai.make_clips import ClipJob, clip_jobs, write_clips
+from ai.make_clips import ClipJob, ClipReport, clip_jobs, main, write_clips
 
 PHRASES = Path(__file__).resolve().parents[1] / "bridge" / "phrases.json"
 
@@ -32,13 +32,48 @@ class ClipJobTests(unittest.TestCase):
         jobs = clip_jobs({"phrases": [], "categories": ["other"]})
         self.assertEqual(jobs, [ClipJob("cat_other", "")])
 
+    def test_spanish_jobs_use_spanish_text_and_skip_categories(self) -> None:
+        catalog = json.loads(
+            (PHRASES.parent / "phrases.es.json").read_text(encoding="utf-8")
+        )
+        jobs = clip_jobs(catalog, language="es")
+        spoken = {job.clip_id: job.text for job in jobs}
+        phrase_ids = [item["id"] for item in catalog["phrases"]]
+        self.assertEqual(list(spoken), phrase_ids)
+        self.assertEqual(spoken["need_water"], "Necesito agua")
+        self.assertEqual(spoken["person_nurse"], "Llame a la enfermera")
+        self.assertTrue(all(not clip_id.startswith("cat_") for clip_id in spoken))
+
+    def test_mandarin_and_russian_jobs_skip_english_category_names(self) -> None:
+        samples = {
+            "zh": ("我需要水", "请叫护士"),
+            "ru": ("Мне нужна вода", "Позовите медсестру"),
+            "hi": ("मुझे पानी चाहिए", "नर्स को बुलाइए"),
+            "vi": ("Tôi cần nước", "Gọi y tá"),
+        }
+        for language, (water, nurse) in samples.items():
+            with self.subTest(language=language):
+                catalog = json.loads(
+                    (PHRASES.parent / f"phrases.{language}.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                jobs = clip_jobs(catalog, language=language)
+                spoken = {job.clip_id: job.text for job in jobs}
+                self.assertEqual(spoken["need_water"], water)
+                self.assertEqual(spoken["person_nurse"], nurse)
+                self.assertTrue(
+                    all(not clip_id.startswith("cat_") for clip_id in spoken)
+                )
+
 
 class WriteClipTests(unittest.TestCase):
     def test_skips_existing_file_unless_force(self) -> None:
         calls: list[str] = []
 
-        def fake(text: str) -> bytes:
+        def fake(text: str, language: str = "en") -> bytes:
             calls.append(text)
+            self.assertEqual(language, "en")
             return _wav()
 
         with tempfile.TemporaryDirectory() as directory:
@@ -87,6 +122,106 @@ class WriteClipTests(unittest.TestCase):
                     force=False,
                 )
             self.assertEqual(report.failed, ("cat_other",))
+
+    def test_spanish_write_passes_spanish_text_without_real_synthesis(self) -> None:
+        catalog = json.loads(
+            (PHRASES.parent / "phrases.es.json").read_text(encoding="utf-8")
+        )
+        seen: list[tuple[str, str]] = []
+
+        def fake(text: str, language: str = "en") -> bytes:
+            seen.append((text, language))
+            return _wav()
+
+        jobs = clip_jobs(catalog, language="es")
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("ai.make_clips.synthesize", side_effect=fake):
+                report = write_clips(
+                    jobs,
+                    Path(directory),
+                    force=False,
+                    language="es",
+                )
+        self.assertEqual(report.failed, ())
+        self.assertEqual(report.written, 16)
+        self.assertEqual(seen[0], ("Necesito agua", "es"))
+        self.assertTrue(all(language == "es" for _text, language in seen))
+        self.assertNotIn("Needs", [text for text, _language in seen])
+
+
+class SpanishClipCommandTests(unittest.TestCase):
+    def test_default_command_keeps_english_clips(self) -> None:
+        with patch(
+            "ai.make_clips.write_clips",
+            return_value=ClipReport(0, 0, ()),
+        ) as write:
+            self.assertEqual(main([]), 0)
+        jobs = write.call_args.args[0]
+        audio_dir = write.call_args.args[1]
+        spoken = {job.clip_id: job.text for job in jobs}
+        self.assertEqual(audio_dir.name, "audio")
+        self.assertEqual(spoken["need_water"], "I need water")
+        self.assertEqual(spoken["person_nurse"], "Call nurse")
+        self.assertEqual(spoken["cat_needs"], "Needs")
+        self.assertEqual(write.call_args.kwargs["language"], "en")
+
+    def test_spanish_command_uses_a_separate_directory(self) -> None:
+        with (
+            patch(
+                "ai.make_clips.write_clips",
+                return_value=ClipReport(0, 0, ()),
+            ) as write,
+            patch("ai.make_clips.synthesize", side_effect=AssertionError("called")),
+        ):
+            self.assertEqual(main(["--language", "es"]), 0)
+        jobs = write.call_args.args[0]
+        audio_dir = write.call_args.args[1]
+        self.assertEqual(audio_dir.name, "es")
+        self.assertEqual(audio_dir.parent.name, "audio")
+        self.assertEqual(jobs[0], ClipJob("need_water", "Necesito agua"))
+        self.assertEqual(jobs[8].text, "Llame a la enfermera")
+        self.assertTrue(all(not job.clip_id.startswith("cat_") for job in jobs))
+        self.assertEqual(write.call_args.kwargs["language"], "es")
+        self.assertFalse((audio_dir).exists())
+
+    def test_missing_language_fails_before_writing(self) -> None:
+        with (
+            patch("ai.make_clips.write_clips", side_effect=AssertionError("write")),
+            patch("ai.make_clips.synthesize", side_effect=AssertionError("called")),
+            self.assertRaises(FileNotFoundError) as raised,
+        ):
+            main(["--language", "fr"])
+        self.assertIn("'fr'", str(raised.exception))
+
+    def test_mandarin_and_russian_commands_use_separate_directories(self) -> None:
+        samples = {
+            "zh": ("我需要水", "请叫护士"),
+            "ru": ("Мне нужна вода", "Позовите медсестру"),
+            "hi": ("मुझे पानी चाहिए", "नर्स को बुलाइए"),
+            "vi": ("Tôi cần nước", "Gọi y tá"),
+        }
+        for language, (water, nurse) in samples.items():
+            with self.subTest(language=language):
+                with (
+                    patch(
+                        "ai.make_clips.write_clips",
+                        return_value=ClipReport(0, 0, ()),
+                    ) as write,
+                    patch(
+                        "ai.make_clips.synthesize",
+                        side_effect=AssertionError("called"),
+                    ),
+                ):
+                    self.assertEqual(main(["--language", language]), 0)
+                jobs = write.call_args.args[0]
+                audio_dir = write.call_args.args[1]
+                self.assertEqual(audio_dir.name, language)
+                self.assertEqual(audio_dir.parent.name, "audio")
+                self.assertEqual(jobs[0].text, water)
+                self.assertEqual(jobs[8].text, nurse)
+                self.assertTrue(all(not job.clip_id.startswith("cat_") for job in jobs))
+                self.assertEqual(write.call_args.kwargs["language"], language)
+                self.assertFalse(audio_dir.exists())
 
 
 def _wav() -> bytes:

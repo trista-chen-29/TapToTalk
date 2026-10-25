@@ -1,0 +1,21 @@
+{
+  "categories": ["needs", "pain_comfort", "people", "yes_no"],
+  "phrases": [
+    {"id": "need_water", "text": "Мне нужна вода", "category": "needs"},
+    {"id": "need_bathroom", "text": "Мне нужно в туалет", "category": "needs"},
+    {"id": "need_suction", "text": "Мне нужно отсасывание", "category": "needs"},
+    {"id": "need_position", "text": "Пожалуйста, поменяйте моё положение", "category": "needs"},
+    {"id": "pain_here", "text": "Мне больно", "category": "pain_comfort"},
+    {"id": "pain_medicine", "text": "Мне нужно обезболивающее", "category": "pain_comfort"},
+    {"id": "comfort_hot", "text": "Мне слишком жарко", "category": "pain_comfort"},
+    {"id": "comfort_cold", "text": "Мне слишком холодно", "category": "pain_comfort"},
+    {"id": "person_nurse", "text": "Позовите медсестру", "category": "people"},
+    {"id": "person_family", "text": "Пожалуйста, позовите мою семью", "category": "people"},
+    {"id": "person_doctor", "text": "Я хочу видеть врача", "category": "people"},
+    {"id": "person_thanks", "text": "Спасибо", "category": "people"},
+    {"id": "yes_yes", "text": "Да", "category": "yes_no"},
+    {"id": "yes_no", "text": "Нет", "category": "yes_no"},
+    {"id": "yes_not_sure", "text": "Я не уверен", "category": "yes_no"},
+    {"id": "yes_repeat", "text": "Пожалуйста, повторите", "category": "yes_no"}
+  ]
+}

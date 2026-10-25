@@ -1,0 +1,21 @@
+{
+  "categories": ["needs", "pain_comfort", "people", "yes_no"],
+  "phrases": [
+    {"id": "need_water", "text": "我需要水", "category": "needs"},
+    {"id": "need_bathroom", "text": "我需要上厕所", "category": "needs"},
+    {"id": "need_suction", "text": "我需要吸痰", "category": "needs"},
+    {"id": "need_position", "text": "请帮我换个姿势", "category": "needs"},
+    {"id": "pain_here", "text": "我很疼", "category": "pain_comfort"},
+    {"id": "pain_medicine", "text": "我需要止痛药", "category": "pain_comfort"},
+    {"id": "comfort_hot", "text": "我太热了", "category": "pain_comfort"},
+    {"id": "comfort_cold", "text": "我太冷了", "category": "pain_comfort"},
+    {"id": "person_nurse", "text": "请叫护士", "category": "people"},
+    {"id": "person_family", "text": "请叫我的家人", "category": "people"},
+    {"id": "person_doctor", "text": "我想见医生", "category": "people"},
+    {"id": "person_thanks", "text": "谢谢", "category": "people"},
+    {"id": "yes_yes", "text": "是", "category": "yes_no"},
+    {"id": "yes_no", "text": "不是", "category": "yes_no"},
+    {"id": "yes_not_sure", "text": "我不确定", "category": "yes_no"},
+    {"id": "yes_repeat", "text": "请再说一遍", "category": "yes_no"}
+  ]
+}
