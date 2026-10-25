@@ -6,6 +6,7 @@ No serial, keyboard, network, or clock reads happen here. The caller passes
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import TypedDict
 
@@ -53,7 +54,8 @@ Effect = Selected | NurseCall | str
 class Machine:
     """Category and phrase menu from the contract button table.
 
-    Phrase order is the catalog order. Ranking is intentionally not called.
+    Phrase mode opens in catalog order. ``reorder_open_phrases`` applies a
+    ranking only while the highlight is still the first phrase.
     """
 
     def __init__(self, catalog: Catalog) -> None:
@@ -94,6 +96,24 @@ class Machine:
             "category": self._category,
             "phrases": phrases,
         }
+
+    def reorder_open_phrases(self, phrase_ids: list[str]) -> State | None:
+        """Apply a new order of the phrases already on screen.
+
+        Returns None when the list must stay put: the menu is not in phrase
+        mode, the patient has moved the highlight, the ids differ, or the
+        order is already the catalog order.
+        """
+        if self._mode != "phrase" or self._highlight != 0:
+            return None
+        current = [item["id"] for item in self._open]
+        if phrase_ids == current or Counter(phrase_ids) != Counter(current):
+            return None
+        by_id = {item["id"]: item["text"] for item in self._open}
+        self._open = [
+            {"id": phrase_id, "text": by_id[phrase_id]} for phrase_id in phrase_ids
+        ]
+        return self.snapshot()
 
     def handle(self, event: str, source: str, now: float) -> tuple[State, list[Effect]]:
         """Apply one TAP, HOLD, HOLD_LONG, or SELECT.

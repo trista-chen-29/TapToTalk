@@ -207,7 +207,8 @@ def test_poisoned_context_is_absent_from_the_request_and_the_log(
     assert ranked_again == ranked
     assert len(seen) == 1
     kwargs = seen[0]
-    assert set(kwargs) == {"model", "max_tokens", "messages"}
+    assert set(kwargs) == {"model", "max_tokens", "thinking", "messages"}
+    assert kwargs["thinking"] == {"type": "disabled"}
     messages = kwargs["messages"]
     assert isinstance(messages, list)
     content = messages[0]["content"]

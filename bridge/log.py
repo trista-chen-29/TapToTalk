@@ -86,3 +86,35 @@ def save_selection(
     if row_id is None:
         raise RuntimeError("insert did not return a row id")
     return int(row_id)
+
+
+def recent_phrase_ids(limit: int = 5, *, db_path: Path | None = None) -> list[str]:
+    """Return up to ``limit`` phrase ids, oldest first.
+
+    The rows are the newest selections. Only catalog ids are included.
+    Timestamps, categories, and sources stay on the laptop.
+    """
+    if limit < 1:
+        return []
+    known = {item["id"] for item in load_phrases()["phrases"]}
+    connection = connect(db_path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT phrase_id FROM selections
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (max(limit * 4, limit),),
+        ).fetchall()
+    finally:
+        connection.close()
+    chosen: list[str] = []
+    for row in rows:
+        phrase_id = str(row["phrase_id"])
+        if phrase_id in known:
+            chosen.append(phrase_id)
+        if len(chosen) == limit:
+            break
+    chosen.reverse()
+    return chosen

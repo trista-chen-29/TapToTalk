@@ -7,17 +7,20 @@ import contextlib
 import json
 import logging
 import time
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
 from aiohttp import WSMsgType, web
 
-from ai.speak import speak
+from ai.rank import rank_phrases
+from ai.speak import speak, speak_category, stop_category_audio
 from bridge.commands import cfg_hold_ms
 from bridge.keyboard import KeyboardLink
-from bridge.log import save_selection, utc_now
+from bridge.log import recent_phrase_ids, save_selection, utc_now
 from bridge.phrases import CALL_NURSE_ID, Catalog, Phrase, load_phrases
 from bridge.profile import Profile, load_profile
 from bridge.serial_link import SerialLink
@@ -42,6 +45,19 @@ class CommandSink(Protocol):
     def send(self, command: str) -> None: ...
 
     def close(self) -> None: ...
+
+
+Ranker = Callable[[dict[str, object]], list[str]]
+
+
+@dataclass(frozen=True)
+class RankResult:
+    """One finished ranking for the category that was highlighted."""
+
+    epoch: int
+    category: str
+    candidates: tuple[str, ...]
+    order: tuple[str, ...]
 
 
 class KeyboardSink(Protocol):
@@ -73,6 +89,12 @@ class Runtime:
     last_input_at: float = 0.0
     no_activity_sent: bool = False
     clock: Callable[[], float] = time.monotonic
+    rank_phrases: Ranker | None = None
+    speak_category: Callable[[str], None] | None = None
+    category_epoch: int = 0
+    rank_task: asyncio.Task[None] | None = None
+    rank_result: RankResult | None = None
+    phrase_epoch: int = 0
 
 
 RUNTIME: web.AppKey[Runtime] = web.AppKey("runtime", Runtime)
@@ -159,6 +181,7 @@ def create_app() -> web.Application:
     app = web.Application()
     app[RUNTIME] = runtime
     app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
     app.on_cleanup.append(on_cleanup)
     app.router.add_get("/", index)
     # Fixed filenames avoid exposing profiles, logs, secrets, or source files.
@@ -186,9 +209,24 @@ async def on_startup(app: web.Application) -> None:
     keyboard.start()
 
 
+async def on_shutdown(app: web.Application) -> None:
+    """Close browser sockets so shutdown can promptly release the Pico port."""
+    await asyncio.gather(
+        *(
+            socket.close(code=1001, message=b"Bridge stopping")
+            for socket in tuple(app[RUNTIME].sockets)
+        )
+    )
+
+
 async def on_cleanup(app: web.Application) -> None:
     """Stop the tick loop and release the serial port."""
     runtime = app[RUNTIME]
+    stop_category_audio()
+    rank_task = cancel_rank(runtime)
+    if rank_task is not None:
+        with contextlib.suppress(asyncio.CancelledError):
+            await rank_task
     runner = runtime.runner
     if runner is not None:
         runner.cancel()
@@ -393,6 +431,236 @@ async def broadcast(runtime: Runtime, payload: dict[str, object]) -> None:
         runtime.sockets.discard(socket)
 
 
+def time_of_day(hour: int) -> str:
+    """Map a local hour to the four labels ranking is allowed to see.
+
+    Morning is 05–11, afternoon is 12–16, evening is 17–20, and night is
+    21–04. The clock time itself is not sent.
+    """
+    if 5 <= hour <= 11:
+        return "morning"
+    if 12 <= hour <= 16:
+        return "afternoon"
+    if 17 <= hour <= 20:
+        return "evening"
+    return "night"
+
+
+def candidates_for(catalog: Catalog, category: str) -> list[str]:
+    """Catalog ids for one category, in file order."""
+    return [
+        phrase["id"] for phrase in catalog["phrases"] if phrase["category"] == category
+    ]
+
+
+def ranking_context(
+    catalog: Catalog,
+    category: str,
+    candidates: list[str],
+) -> dict[str, object]:
+    """Build the section 8 object from ids and time of day only."""
+    allowed = {phrase["id"] for phrase in catalog["phrases"]}
+    try:
+        last = recent_phrase_ids(5)
+    except Exception:
+        logger.warning("could not read recent selections for ranking")
+        last = []
+    return {
+        "time_of_day": time_of_day(datetime.now().hour),
+        "category": category,
+        "last_selections": [phrase_id for phrase_id in last if phrase_id in allowed][
+            :5
+        ],
+        "candidates": list(candidates),
+    }
+
+
+def call_ranker(
+    ranker: Ranker,
+    catalog: Catalog,
+    category: str,
+    candidates: list[str],
+) -> list[str]:
+    """Run one ranking call. Used from a worker thread."""
+    return ranker(ranking_context(catalog, category, candidates))
+
+
+def _string_list(order: object) -> list[str] | None:
+    if not isinstance(order, list) or not all(isinstance(item, str) for item in order):
+        return None
+    return list(order)
+
+
+def _silence_rank_cancel(task: asyncio.Task[None]) -> None:
+    """Mark a cancelled ranking task retrieved so shutdown stays quiet."""
+    try:
+        task.exception()
+    except (asyncio.CancelledError, asyncio.InvalidStateError):
+        return
+
+
+def cancel_rank(runtime: Runtime) -> asyncio.Task[None] | None:
+    """Drop an in-flight ranking so it cannot reorder after the patient moves."""
+    runtime.phrase_epoch += 1
+    runtime.rank_result = None
+    task = runtime.rank_task
+    runtime.rank_task = None
+    if task is not None and not task.done():
+        task.cancel()
+        task.add_done_callback(_silence_rank_cancel)
+    return task
+
+
+def start_rank(app: web.Application, category: str, candidates: list[str]) -> None:
+    """Rank one highlighted category without waiting for Claude."""
+    runtime = app[RUNTIME]
+    if runtime.rank_phrases is None or not candidates:
+        return
+    cancel_rank(runtime)
+    epoch = runtime.phrase_epoch
+    runtime.rank_task = asyncio.create_task(
+        finish_rank(app, epoch, category, list(candidates)),
+        name="phrase-rank",
+    )
+
+
+async def finish_rank(
+    app: web.Application,
+    epoch: int,
+    category: str,
+    candidates: list[str],
+) -> None:
+    """Store a ranking, and update an open phrase list that is still on top."""
+    runtime = app[RUNTIME]
+    ranker = runtime.rank_phrases
+    if ranker is None:
+        return
+    try:
+        order = await asyncio.to_thread(
+            call_ranker, ranker, runtime.catalog, category, candidates
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning("phrase ranking failed; keeping the fixed order")
+        return
+    ranked = _string_list(order)
+    if ranked is None or runtime.phrase_epoch != epoch:
+        return
+    if ranked == candidates:
+        logger.info("ranking kept catalog order category=%s", category)
+        return
+    if Counter(ranked) != Counter(candidates):
+        logger.warning("phrase ranking was not used; keeping the fixed order")
+        return
+    snapshot = runtime.machine.snapshot()
+    if (
+        runtime.phrase_epoch != epoch
+        or snapshot["category"] != category
+        or snapshot["mode"] not in {"category", "phrase"}
+    ):
+        return
+    runtime.rank_result = RankResult(
+        epoch=epoch,
+        category=category,
+        candidates=tuple(candidates),
+        order=tuple(ranked),
+    )
+    logger.info("ranked category=%s order=%s", category, ",".join(ranked))
+    if snapshot["mode"] != "phrase":
+        return
+    state = runtime.machine.reorder_open_phrases(ranked)
+    if state is None:
+        if snapshot["highlight_index"] == 0:
+            logger.warning("phrase ranking was not used; keeping the fixed order")
+        return
+    await publish(app, state, [], runtime.clock())
+
+
+def apply_pending_rank(runtime: Runtime, previous: str, state: State) -> State:
+    """Use a finished ranking as the first phrase list when it is ready."""
+    if previous == "phrase" or state["mode"] != "phrase":
+        return state
+    result = runtime.rank_result
+    category = state["category"]
+    if (
+        result is None
+        or category is None
+        or result.epoch != runtime.phrase_epoch
+        or result.category != category
+    ):
+        return state
+    current = [item["id"] for item in state["phrases"]]
+    if list(result.candidates) != current:
+        return state
+    ranked = runtime.machine.reorder_open_phrases(list(result.order))
+    if ranked is None:
+        return state
+    return ranked
+
+
+def follow_category_audio(app: web.Application, before: State, state: State) -> None:
+    """Play the saved category name when that highlight changes.
+
+    The clip runs off the event loop. Leaving the category menu drops a play
+    that has not started. A live voice call is never used for this.
+    """
+    runtime = app[RUNTIME]
+    player = runtime.speak_category
+    if player is None:
+        return
+    category = state["category"]
+    if state["mode"] == "category" and category is not None:
+        if before["mode"] == "category" and before["category"] == category:
+            return
+        runtime.category_epoch += 1
+        asyncio.create_task(
+            _play_category(app, player, category, runtime.category_epoch),
+            name="category-audio",
+        )
+        return
+    if before["mode"] == "category":
+        runtime.category_epoch += 1
+        stop_category_audio()
+
+
+async def _play_category(
+    app: web.Application,
+    player: Callable[[str], None],
+    category_id: str,
+    epoch: int,
+) -> None:
+    """Play one category clip unless the highlight has already moved on."""
+    runtime = app[RUNTIME]
+
+    def play_if_current() -> None:
+        if runtime.category_epoch != epoch:
+            return
+        player(category_id)
+
+    try:
+        await asyncio.to_thread(play_if_current)
+    except Exception:
+        logger.warning("category audio failed category=%s", category_id)
+
+
+def follow_rank(app: web.Application, before: State, state: State) -> None:
+    """Start ranking for a newly highlighted category, or cancel it."""
+    runtime = app[RUNTIME]
+    if before["mode"] == "phrase" or (
+        state["mode"] == "idle" and before["mode"] != "idle"
+    ):
+        cancel_rank(runtime)
+        return
+    category = state["category"]
+    if (
+        state["mode"] == "category"
+        and category is not None
+        and category != before["category"]
+    ):
+        start_rank(app, category, candidates_for(runtime.catalog, category))
+
+
 async def handle_item(
     app: web.Application,
     item: tuple[str, str],
@@ -402,7 +670,8 @@ async def handle_item(
     event, source = item
     runtime = app[RUNTIME]
     machine = runtime.machine
-    previous = machine.snapshot()["mode"]
+    before = machine.snapshot()
+    previous = before["mode"]
     runtime.last_input_at = now
     if event == "RESET":
         state, effects = machine.reset()
@@ -411,7 +680,10 @@ async def handle_item(
     if previous == "idle" and state["mode"] == "category":
         runtime.no_activity_sent = False
         send_hold_config(app)
+    state = apply_pending_rank(runtime, previous, state)
     await publish(app, state, effects, now)
+    follow_rank(app, before, state)
+    follow_category_audio(app, before, state)
 
 
 async def publish_no_activity(app: web.Application, now: float) -> None:
@@ -480,6 +752,8 @@ def main() -> None:
     )
     app = create_app()
     app[RUNTIME].inputs_enabled = True
+    app[RUNTIME].rank_phrases = rank_phrases
+    app[RUNTIME].speak_category = speak_category
     print("Patient page: http://localhost:8765")
     print("WebSocket: ws://localhost:8765")
     web.run_app(app, host="localhost", port=8765)

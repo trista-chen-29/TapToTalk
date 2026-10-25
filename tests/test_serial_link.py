@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -12,6 +13,7 @@ from bridge.serial_link import (
     SerialLink,
     accept_line,
     find_pico_port,
+    open_serial,
 )
 
 
@@ -27,7 +29,7 @@ class FakePort:
         self.written: list[bytes] = []
         self.closed = False
 
-    def readline(self) -> bytes:
+    def readline(self, size: int = -1) -> bytes:
         if self.closed:
             raise OSError("closed")
         if self._lines:
@@ -79,6 +81,57 @@ class FindPortTests(unittest.TestCase):
 
 
 class SerialLinkTests(unittest.IsolatedAsyncioTestCase):
+    async def test_pending_read_does_not_block_commands_or_shutdown(self) -> None:
+        class WaitingPort(FakePort):
+            def __init__(self) -> None:
+                super().__init__([])
+                self.reading = threading.Event()
+                self.release = threading.Event()
+                self.close_calls = 0
+
+            def readline(self, size: int = -1) -> bytes:
+                self.reading.set()
+                self.release.wait(timeout=2)
+                return b""
+
+            def close(self) -> None:
+                self.close_calls += 1
+                super().close()
+                self.release.set()
+
+        port = WaitingPort()
+        link = SerialLink(
+            asyncio.get_running_loop(),
+            asyncio.Queue(),
+            port_finder=lambda: "/dev/fake",
+            port_opener=lambda _name: port,
+        )
+        link.start()
+        try:
+            self.assertTrue(await asyncio.to_thread(port.reading.wait, 1))
+            await asyncio.wait_for(
+                asyncio.to_thread(link.send, "LED listening"), timeout=0.5
+            )
+            self.assertEqual(port.written, [b"LED listening\n"])
+            self.assertFalse(port.release.is_set())
+            await asyncio.wait_for(asyncio.to_thread(link.close), timeout=0.5)
+            self.assertTrue(port.closed)
+            self.assertEqual(port.close_calls, 1)
+        finally:
+            port.release.set()
+            await asyncio.to_thread(link.close)
+
+    def test_open_requests_exclusive_access(self) -> None:
+        with patch("bridge.serial_link.serial.Serial") as factory:
+            open_serial("/dev/pico")
+        factory.assert_called_once_with(
+            port="/dev/pico",
+            baudrate=115200,
+            timeout=0.2,
+            write_timeout=0.2,
+            exclusive=True,
+        )
+
     async def test_reader_queues_only_known_events(self) -> None:
         queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
         opened = FakePort(
@@ -124,6 +177,40 @@ class SerialLinkTests(unittest.IsolatedAsyncioTestCase):
             any("no Pico found, keyboard only" in line for line in caught.output)
         )
         self.assertTrue(queue.empty())
+
+    async def test_split_events_wait_for_newline_and_preserve_order(self) -> None:
+        queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+        port = FakePort(
+            [b"HO", b"", b"LD", b"_LO", b"NG\n", b"TAP\n", b"SE", b"LECT\r", b"\n"]
+        )
+        link = SerialLink(
+            asyncio.get_running_loop(),
+            queue,
+            port_finder=lambda: "/dev/fake",
+            port_opener=lambda _name: port,
+        )
+        link.start()
+        self.addAsyncCleanup(asyncio.to_thread, link.close)
+        got = [await asyncio.wait_for(queue.get(), timeout=2) for _ in range(3)]
+        self.assertEqual(got, [("HOLD_LONG", "tap"), ("TAP", "tap"), ("SELECT", "tap")])
+        self.assertTrue(queue.empty())
+
+    async def test_invalid_or_incomplete_lines_cannot_emit_events(self) -> None:
+        queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+        port = FakePort([b"x" * 65, b"HOLD\n", b"\xffTAP\n", b"SELECT\n", b"HOLD"])
+        link = SerialLink(
+            asyncio.get_running_loop(),
+            queue,
+            port_finder=lambda: "/dev/fake",
+            port_opener=lambda _name: port,
+        )
+        link.start()
+        self.addAsyncCleanup(asyncio.to_thread, link.close)
+        self.assertEqual(
+            await asyncio.wait_for(queue.get(), timeout=2), ("SELECT", "tap")
+        )
+        with self.assertRaises(TimeoutError):
+            await asyncio.wait_for(queue.get(), timeout=0.1)
 
     def test_send_before_open_does_not_raise(self) -> None:
         loop = asyncio.new_event_loop()

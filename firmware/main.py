@@ -38,11 +38,11 @@ HOLD_LONG_MS = 3000           # direct nurse call (FR19); fixed, CFG hold_ms doe
 HOLD_MS_MIN = 200             # CFG values outside this range are ignored
 HOLD_MS_MAX = 5000
 DEBOUNCE_MS = 30              # a change must last this long to count
-POLL_MS = 5                   # how often the pins are read
+POLL_MS = 1                   # narrow KY-036 pulses were missed at 5 ms on the Pico 2 W
 
 TOUCH_ACTIVE_LOW = False      # True if the touch sensor reads 0 when touched
 KEY_ACTIVE_LOW = True         # HW-483 key module reads 0 when pressed
-TOUCH_HOLDOVER_MS = 20        # bridges mains flicker; shorter than DEBOUNCE_MS so a spike is not a second tap (set 0 for a TTP223)
+TOUCH_HOLDOVER_MS = 150       # bridge gaps in the KY-036 pulse train (set 0 for a TTP223)
 HELD_HOLDOVER_MS = 500        # once HOLD is sent, a dropout shorter than this still counts as
                               # held, so a wobbly 3-second hold can reach HOLD_LONG
 
@@ -132,15 +132,25 @@ class Input:
 
         if (self.on_hold and self.stable and self.pressed_at is not None
                 and not self.hold_sent
-                and time.ticks_diff(now, self.pressed_at) >= self.hold_ms):
+                and self.held_for(now, self.hold_ms)):
             self.hold_sent = True
             self.on_hold()
 
         if (self.on_long and self.stable and self.pressed_at is not None
                 and self.hold_sent and not self.long_sent
-                and time.ticks_diff(now, self.pressed_at) >= self.long_ms):
+                and self.held_for(now, self.long_ms)):
             self.long_sent = True
             self.on_long()
+
+    def held_for(self, now, duration_ms):
+        if time.ticks_diff(now, self.pressed_at) < duration_ms:
+            return False
+        # Smoothing bridges gaps, but cannot prove a finger is still touching.
+        # Require a real active sample at/after the threshold before emitting.
+        if self.holdover_ms:
+            return (self.last_on is not None
+                    and time.ticks_diff(self.last_on, self.pressed_at) >= duration_ms)
+        return True
 
 
 touch = Input(Pin(TOUCH_PIN, Pin.IN), active_low=TOUCH_ACTIVE_LOW,
@@ -286,14 +296,19 @@ def read_commands():
 
 
 # ---- Main loop ------------------------------------------------------------------
-try:
-    while True:
-        now = time.ticks_ms()
-        touch.update(now)
-        key.update(now)
-        read_commands()
-        local.update(now)
-        led.update(now)
-        time.sleep_ms(POLL_MS)
-except KeyboardInterrupt:
-    show((0, 0, 0))     # Stop in Thonny turns the LED off
+def main():
+    try:
+        while True:
+            now = time.ticks_ms()
+            touch.update(now)
+            key.update(now)
+            read_commands()
+            local.update(now)
+            led.update(now)
+            time.sleep_ms(POLL_MS)
+    except KeyboardInterrupt:
+        show((0, 0, 0))     # Stop in Thonny turns the LED off
+
+
+if __name__ == "__main__":
+    main()

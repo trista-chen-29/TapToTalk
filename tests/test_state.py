@@ -321,6 +321,28 @@ class ResetAndIgnoreTests(unittest.TestCase):
         self.assertEqual(state["mode"], "idle")
         self.assertEqual(effects, ["LED idle"])
 
+    def test_reorder_applies_only_while_the_first_phrase_is_highlighted(self) -> None:
+        machine, _now, state, _effects = drive(["HOLD", "SELECT"])
+        self.assertEqual([item["id"] for item in state["phrases"]], NEEDS)
+        self.assertIsNone(machine.reorder_open_phrases(["need_water"]))
+        self.assertIsNone(machine.reorder_open_phrases(["need_water", "need_water"]))
+        ranked = machine.reorder_open_phrases(list(reversed(NEEDS)))
+        self.assertIsNotNone(ranked)
+        assert ranked is not None
+        self.assertEqual(
+            [item["id"] for item in ranked["phrases"]],
+            list(reversed(NEEDS)),
+        )
+        self.assertEqual(ranked["highlight_index"], 0)
+        self.assertIsNone(machine.reorder_open_phrases(list(reversed(NEEDS))))
+        machine.handle("TAP", "tap", 10.0)
+        self.assertIsNone(machine.reorder_open_phrases(NEEDS))
+        self.assertEqual(
+            [item["id"] for item in machine.snapshot()["phrases"]],
+            list(reversed(NEEDS)),
+        )
+        self.assertIsNone(Machine(CATALOG).reorder_open_phrases(list(reversed(NEEDS))))
+
     def test_select_in_idle_does_not_start_the_timer(self) -> None:
         machine = Machine(CATALOG)
         state, effects = machine.handle("SELECT", "keyboard", 0.0)

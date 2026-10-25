@@ -41,8 +41,8 @@ The helper reads the on-disk profile. The bridge still needs to coordinate an
 effective per-session settings snapshot so edits apply on the next session, as
 specified in the contract. No profile fields or timing rules are changed here.
 
-Category-highlight clip playback remains a separate integration task: this
-phrase function intentionally validates phrase IDs and does not accept cat_* IDs.
+Category highlights use `speak_category`, which plays `cat_<category>.wav` and
+does not accept those ids in `speak`. A highlight never calls Cartesia.
 The user manually tested pain_here and person_nurse; the remaining files were
 inspected as WAVs, not individually listened to. Real hardware, every profile's nurse-call flow, other
 operating systems, and live Cartesia failure recovery are not end-to-end verified.

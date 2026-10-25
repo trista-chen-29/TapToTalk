@@ -99,6 +99,63 @@ def speak(phrase_id: str, text: str) -> None:
     print("Played Cartesia audio.")
 
 
+_category_stop = threading.Event()
+_category_stop_lock = threading.Lock()
+
+
+def speak_category(category_id: str) -> None:
+    """Play the saved category-name clip. Never calls Cartesia.
+
+    A newer highlight or a leave from category mode stops this clip so a tap
+    is not stuck behind audio. Missing clips stay silent.
+    """
+    if not isinstance(category_id, str):
+        return
+    try:
+        profile = load_profile()
+        catalog = load_phrases(language=profile["language"])
+        if (
+            category_id not in catalog["categories"]
+            or not profile["audio_on"]
+            or profile["output"] == "screen"
+            or profile["language"] != "en"
+        ):
+            return
+        root = _AUDIO_DIR.resolve()
+        clip = (root / f"cat_{category_id}.wav").resolve()
+        if root not in clip.parents or not clip.is_file():
+            return
+        audio = clip.read_bytes()
+    except Exception:
+        print("Category clip unavailable.")
+        return
+
+    stop = _claim_category_playback()
+    try:
+        _play_wav(audio, stop=stop)
+    except Exception:
+        print("Category clip unavailable.")
+        return
+    if not stop.is_set():
+        print("Played category audio.")
+
+
+def stop_category_audio() -> None:
+    """Stop the category-name clip if one is playing."""
+    with _category_stop_lock:
+        _category_stop.set()
+
+
+def _claim_category_playback() -> threading.Event:
+    """Mark any current category clip as finished and return a fresh stop."""
+    global _category_stop
+    with _category_stop_lock:
+        _category_stop.set()
+        stop = threading.Event()
+        _category_stop = stop
+        return stop
+
+
 def _load_api_key() -> str | None:
     """Read CARTESIA_API_KEY from the environment or the repo .env file."""
     load_dotenv(_ENV_PATH, override=False)
@@ -139,7 +196,7 @@ def _synthesize(api_key: str, text: str) -> bytes:
         return response.read()
 
 
-def _play_wav(audio: bytes) -> None:
+def _play_wav(audio: bytes, *, stop: threading.Event | None = None) -> None:
     """Play WAV bytes on the default output device and wait until they finish."""
     decoded = miniaudio.wav_read_s16(audio)
     if decoded.num_frames <= 0:
@@ -152,10 +209,13 @@ def _play_wav(audio: bytes) -> None:
         sample_width=2,
     )
 
+    def stopped() -> bool:
+        return stop is not None and stop.is_set()
+
     def watched():
         try:
             requested = yield b""
-            while True:
+            while not stopped():
                 try:
                     chunk = source.send(requested)
                 except StopIteration:
@@ -176,10 +236,16 @@ def _play_wav(audio: bytes) -> None:
         if device.backend.lower() == "null":
             raise RuntimeError("no playback device is available")
         device.start(stream)
-        if not finished.wait(timeout=decoded.duration + 2.0):
+        deadline = time.monotonic() + decoded.duration + 2.0
+        while not finished.is_set():
+            if stopped() or time.monotonic() >= deadline:
+                break
+            finished.wait(0.05)
+        if not finished.is_set() and not stopped():
             raise RuntimeError("playback did not finish")
         # Core Audio still has a short buffer after the last frame is queued.
-        time.sleep(0.3)
+        if not stopped():
+            time.sleep(0.3)
     finally:
         device.close()
 

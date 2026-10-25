@@ -47,7 +47,19 @@ test('connects to existing socket and ignores patient state', () => {
   assert.equal(elements['alerts-empty'].hidden, false);
 });
 
-test('renders both contract alert kinds newest received first with UTC timestamp', () => {
+function localRaised(stamp) {
+  const formatted = new Date(stamp).toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  });
+  return `Raised: ${formatted}`;
+}
+
+test('renders both contract alert kinds newest received first in local time', () => {
   const { elements, receive, alert } = setup();
   receive(alert());
   receive(alert('no_activity', '2026-10-24T02:20:00Z'));
@@ -56,6 +68,9 @@ test('renders both contract alert kinds newest received first with UTC timestamp
   assert.equal(rows[0].children[0].textContent, 'No activity');
   assert.equal(rows[1].children[0].textContent, 'Call nurse');
   assert.equal(rows[0].children[1].attributes.datetime, '2026-10-24T02:20:00Z');
+  assert.equal(rows[0].children[1].textContent, localRaised('2026-10-24T02:20:00Z'));
+  assert.equal(rows[1].children[1].textContent, localRaised('2026-10-24T02:15:00Z'));
+  assert.doesNotMatch(rows[0].children[1].textContent, /\(UTC\)/);
   assert.match(rows[0].children[2].textContent, /status unavailable/);
   assert.equal(elements['alerts-empty'].hidden, true);
   assert.equal(elements['alert-summary'].textContent, '2 alerts received in this tab.');
