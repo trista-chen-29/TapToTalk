@@ -98,7 +98,8 @@ class Machine:
     def handle(self, event: str, source: str, now: float) -> tuple[State, list[Effect]]:
         """Apply one TAP, HOLD, HOLD_LONG, or SELECT.
 
-        Unknown events leave the state as it is. HOLD is the 1-second action.
+        Unknown events leave the state as it is. A TAP in idle does the same.
+        HOLD is the 1-second action. In idle it starts a session.
         HOLD_LONG is the separate 3-second event from the Pico, and it calls
         the nurse from every mode. A long press still emits HOLD first.
         """
@@ -107,7 +108,7 @@ class Machine:
         if event == "HOLD_LONG":
             return self._call_nurse(source, now)
         if self._mode == "idle":
-            if event == "SELECT":
+            if event in {"TAP", "SELECT"}:
                 return self.snapshot(), []
             return self._enter_category(now)
         if self._mode == "category":

@@ -6,16 +6,18 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
 from aiohttp import web
 
+from ai.speak import speak
 from bridge.commands import cfg_hold_ms
 from bridge.keyboard import KeyboardLink
-from bridge.log import utc_now
-from bridge.phrases import load_phrases
+from bridge.log import save_selection, utc_now
+from bridge.phrases import Catalog, Phrase, load_phrases
 from bridge.profile import Profile, load_profile
 from bridge.serial_link import SerialLink
 from bridge.state import Effect, Machine, NurseCall, Selected, State
@@ -25,6 +27,14 @@ logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 LOOP_TICK_S = 0.1
 LED_RESEND_S = 5.0
+NURSE_CALL_DEDUPE_S = 60.0
+# serial_link.py queues Pico input as "tap". keyboard.py queues "keyboard".
+_LOG_SOURCES = {
+    "tap": "tap",
+    "keyboard": "keyboard",
+    "ui": "ui",
+    "fixed": "fixed",
+}
 
 
 class CommandSink(Protocol):
@@ -45,6 +55,7 @@ class Runtime:
 
     profile: Profile
     machine: Machine
+    catalog: Catalog
     sockets: set[web.WebSocketResponse] = field(default_factory=set)
     events: asyncio.Queue[tuple[str, str]] = field(default_factory=asyncio.Queue)
     publish_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -57,6 +68,10 @@ class Runtime:
     runner: asyncio.Task[None] | None = None
     inputs_enabled: bool = False
     profile_path: Path | None = None
+    last_nurse_call_at: float | None = None
+    last_input_at: float = 0.0
+    no_activity_sent: bool = False
+    clock: Callable[[], float] = time.monotonic
 
 
 RUNTIME: web.AppKey[Runtime] = web.AppKey("runtime", Runtime)
@@ -133,9 +148,11 @@ def create_app() -> web.Application:
     runtime = Runtime(
         profile=profile,
         machine=machine,
+        catalog=catalog,
         last_state=machine.snapshot(),
         last_state_change=now,
         last_led_send=now,
+        last_input_at=now,
     )
     app = web.Application()
     app[RUNTIME] = runtime
@@ -212,13 +229,38 @@ def send_led(runtime: Runtime, command: str, now: float) -> None:
         runtime.serial.send(command)
 
 
+def _catalog_phrase(catalog: Catalog, phrase_id: str) -> Phrase | None:
+    """Return the catalog entry for one phrase id."""
+    for phrase in catalog["phrases"]:
+        if phrase["id"] == phrase_id:
+            return phrase
+    return None
+
+
+def _log_source(source: str) -> str | None:
+    """Map an input source onto tap, keyboard, ui, or fixed."""
+    return _LOG_SOURCES.get(source)
+
+
+async def _speak(phrase_id: str, text: str) -> None:
+    """Speak one phrase off the event loop. A failure stays in the log."""
+    try:
+        await asyncio.to_thread(speak, phrase_id, text)
+    except Exception:
+        logger.warning("speech failed phrase_id=%s", phrase_id)
+
+
 async def publish(
     app: web.Application,
     state: State,
     effects: list[Effect],
     now: float,
 ) -> None:
-    """Log a choice, send LED commands, and broadcast a changed state."""
+    """Log a choice, speak it, send LED commands, and broadcast a changed state.
+
+    A nurse call less than 60 seconds after the last broadcast is not sent
+    again. The LED effect for that call is still applied.
+    """
     runtime = app[RUNTIME]
     async with runtime.publish_lock:
         for effect in effects:
@@ -228,12 +270,30 @@ async def publish(
                     effect.phrase_id,
                     effect.source,
                 )
+                phrase = _catalog_phrase(runtime.catalog, effect.phrase_id)
+                if phrase is None:
+                    logger.warning("selected unknown phrase_id=%s", effect.phrase_id)
+                else:
+                    source = _log_source(effect.source)
+                    if source is None:
+                        logger.warning(
+                            "selected phrase_id=%s source cannot be logged",
+                            effect.phrase_id,
+                        )
+                    else:
+                        save_selection(effect.phrase_id, phrase["category"], source)
+                        await _speak(effect.phrase_id, phrase["text"])
             elif isinstance(effect, NurseCall):
                 logger.info(
                     "nurse_call phrase_id=%s source=%s",
                     effect.phrase_id,
                     effect.source,
                 )
+                # `now` is monotonic, from Runtime.clock. The message time is UTC.
+                last_sent = runtime.last_nurse_call_at
+                if last_sent is not None and now - last_sent < NURSE_CALL_DEDUPE_S:
+                    continue
+                runtime.last_nurse_call_at = now
                 await broadcast(
                     runtime,
                     {
@@ -283,13 +343,44 @@ async def handle_item(
     runtime = app[RUNTIME]
     machine = runtime.machine
     previous = machine.snapshot()["mode"]
+    runtime.last_input_at = now
     if event == "RESET":
         state, effects = machine.reset()
     else:
         state, effects = machine.handle(event, source, now)
     if previous == "idle" and state["mode"] == "category":
+        runtime.no_activity_sent = False
         send_hold_config(app)
     await publish(app, state, effects, now)
+
+
+async def publish_no_activity(app: web.Application, now: float) -> None:
+    """Broadcast one no-activity alert per idle period.
+
+    The quiet time is profile idle_alert_minutes with no input. A new session
+    (idle to category) arms one more alert for the following idle period.
+    CONTRACT.md section 7.
+    """
+    runtime = app[RUNTIME]
+    async with runtime.publish_lock:
+        if runtime.no_activity_sent:
+            return
+        if runtime.machine.snapshot()["mode"] != "idle":
+            return
+        limit_s = runtime.profile["idle_alert_minutes"] * 60
+        if now - runtime.last_input_at < limit_s:
+            return
+        runtime.no_activity_sent = True
+        logger.info("no_activity")
+        await broadcast(
+            runtime,
+            {
+                "type": "alert",
+                "kind": "no_activity",
+                "phrase_id": None,
+                "timestamp": utc_now(),
+            },
+        )
 
 
 async def run_once(app: web.Application) -> None:
@@ -299,12 +390,13 @@ async def run_once(app: web.Application) -> None:
         item = await asyncio.wait_for(runtime.events.get(), timeout=LOOP_TICK_S)
     except TimeoutError:
         item = None
-    now = time.monotonic()
+    now = runtime.clock()
     if item is not None:
         await handle_item(app, item, now)
-        now = time.monotonic()
+        now = runtime.clock()
     state, effects = runtime.machine.tick(now)
     await publish(app, state, effects, now)
+    await publish_no_activity(app, now)
     if led_resend_due(now, runtime.last_state_change, runtime.last_led_send):
         send_led(runtime, runtime.last_led, now)
 

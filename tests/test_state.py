@@ -43,14 +43,14 @@ class ContractTableTests(unittest.TestCase):
     def test_contract_table(self) -> None:
         cases: list[dict[str, object]] = [
             {
-                "name": "idle TAP enters the first category",
+                "name": "idle TAP stays idle with no effects",
                 "setup": [],
                 "event": "TAP",
-                "mode": "category",
+                "mode": "idle",
                 "highlight_index": 0,
-                "category": "needs",
+                "category": None,
                 "phrase_ids": [],
-                "effects": ["LED listening"],
+                "effects": [],
             },
             {
                 "name": "idle HOLD starts a session",
@@ -74,7 +74,7 @@ class ContractTableTests(unittest.TestCase):
             },
             {
                 "name": "category TAP highlights the next category",
-                "setup": ["TAP"],
+                "setup": ["HOLD"],
                 "event": "TAP",
                 "mode": "category",
                 "highlight_index": 1,
@@ -84,7 +84,7 @@ class ContractTableTests(unittest.TestCase):
             },
             {
                 "name": "category TAP wraps to the first category",
-                "setup": ["TAP", "TAP", "TAP", "TAP"],
+                "setup": ["HOLD", "TAP", "TAP", "TAP"],
                 "event": "TAP",
                 "mode": "category",
                 "highlight_index": 0,
@@ -94,7 +94,7 @@ class ContractTableTests(unittest.TestCase):
             },
             {
                 "name": "category HOLD opens phrases",
-                "setup": ["TAP"],
+                "setup": ["HOLD"],
                 "event": "HOLD",
                 "mode": "phrase",
                 "highlight_index": 0,
@@ -104,7 +104,7 @@ class ContractTableTests(unittest.TestCase):
             },
             {
                 "name": "category SELECT opens phrases",
-                "setup": ["TAP"],
+                "setup": ["HOLD"],
                 "event": "SELECT",
                 "mode": "phrase",
                 "highlight_index": 0,
@@ -114,7 +114,7 @@ class ContractTableTests(unittest.TestCase):
             },
             {
                 "name": "phrase TAP highlights the next phrase",
-                "setup": ["TAP", "HOLD"],
+                "setup": ["HOLD", "HOLD"],
                 "event": "TAP",
                 "mode": "phrase",
                 "highlight_index": 1,
@@ -124,7 +124,7 @@ class ContractTableTests(unittest.TestCase):
             },
             {
                 "name": "phrase TAP wraps to the first phrase",
-                "setup": ["TAP", "HOLD", "TAP", "TAP", "TAP"],
+                "setup": ["HOLD", "HOLD", "TAP", "TAP", "TAP"],
                 "event": "TAP",
                 "mode": "phrase",
                 "highlight_index": 0,
@@ -134,7 +134,7 @@ class ContractTableTests(unittest.TestCase):
             },
             {
                 "name": "phrase HOLD chooses the highlighted phrase",
-                "setup": ["TAP", "HOLD", "TAP"],
+                "setup": ["HOLD", "HOLD", "TAP"],
                 "event": "HOLD",
                 "source": "keyboard",
                 "mode": "idle",
@@ -145,7 +145,7 @@ class ContractTableTests(unittest.TestCase):
             },
             {
                 "name": "phrase SELECT chooses the highlighted phrase",
-                "setup": ["TAP", "SELECT"],
+                "setup": ["HOLD", "SELECT"],
                 "event": "SELECT",
                 "mode": "idle",
                 "highlight_index": 0,
@@ -186,7 +186,7 @@ class ContractTableTests(unittest.TestCase):
                     self.assertEqual(set(phrase), {"id", "text"})
 
     def test_phrase_order_is_catalog_order(self) -> None:
-        machine, now, _state, _effects = drive(["TAP", "TAP"])
+        machine, now, _state, _effects = drive(["HOLD", "TAP"])
         state, _effects = machine.handle("HOLD", "tap", now)
         self.assertEqual(
             [item["id"] for item in state["phrases"]],
@@ -194,7 +194,7 @@ class ContractTableTests(unittest.TestCase):
         )
 
     def test_call_nurse_phrase_can_be_chosen(self) -> None:
-        machine, now, _state, _effects = drive(["TAP", "TAP", "TAP"])
+        machine, now, _state, _effects = drive(["HOLD", "TAP", "TAP"])
         state, _effects = machine.handle("HOLD", "tap", now)
         self.assertEqual(state["category"], "people")
         self.assertEqual(state["phrases"][0]["id"], "person_nurse")
@@ -206,7 +206,7 @@ class ContractTableTests(unittest.TestCase):
 class TimerTests(unittest.TestCase):
     def test_eight_seconds_without_input_returns_to_idle(self) -> None:
         machine = Machine(CATALOG)
-        machine.handle("TAP", "tap", 0.0)
+        machine.handle("HOLD", "tap", 0.0)
         state, effects = machine.tick(IDLE_TIMEOUT_S - 0.001)
         self.assertEqual(state["mode"], "category")
         self.assertEqual(effects, [])
@@ -221,7 +221,7 @@ class TimerTests(unittest.TestCase):
 
     def test_input_restarts_the_idle_timer(self) -> None:
         machine = Machine(CATALOG)
-        machine.handle("TAP", "tap", 0.0)
+        machine.handle("HOLD", "tap", 0.0)
         machine.handle("TAP", "tap", 7.0)
         state, effects = machine.tick(8.0)
         self.assertEqual(state["mode"], "category")
@@ -232,7 +232,7 @@ class TimerTests(unittest.TestCase):
         self.assertEqual(effects, ["LED idle"])
 
     def test_hold_long_calls_the_nurse_from_every_mode(self) -> None:
-        setups = ([], ["TAP"], ["TAP", "HOLD"])
+        setups = ([], ["HOLD"], ["HOLD", "HOLD"])
         for setup in setups:
             with self.subTest(setup=setup):
                 machine, now, _prior, _effects = drive(setup)
@@ -264,7 +264,7 @@ class TimerTests(unittest.TestCase):
         self.assertEqual(effects, [])
 
     def test_sent_led_returns_to_idle_after_two_seconds(self) -> None:
-        machine, now, _state, effects = drive(["TAP", "HOLD", "SELECT"])
+        machine, now, _state, effects = drive(["HOLD", "HOLD", "SELECT"])
         self.assertEqual(effects[-1], "LED sent")
         state, effects = machine.tick(now - 1 + SENT_LED_S - 0.001)
         self.assertEqual(effects, [])
@@ -275,9 +275,9 @@ class TimerTests(unittest.TestCase):
         self.assertEqual(effects, [])
 
     def test_new_input_cancels_the_sent_lamp(self) -> None:
-        machine, now, _state, _effects = drive(["TAP", "HOLD", "SELECT"])
+        machine, now, _state, _effects = drive(["HOLD", "HOLD", "SELECT"])
         chosen_at = now - 1
-        state, effects = machine.handle("TAP", "tap", chosen_at + 1)
+        state, effects = machine.handle("HOLD", "tap", chosen_at + 1)
         self.assertEqual(state["mode"], "category")
         self.assertEqual(effects, ["LED listening"])
         state, effects = machine.tick(chosen_at + SENT_LED_S)
@@ -287,7 +287,7 @@ class TimerTests(unittest.TestCase):
 
 class ResetAndIgnoreTests(unittest.TestCase):
     def test_reset_returns_to_idle(self) -> None:
-        machine, _now, _state, _effects = drive(["TAP", "HOLD", "TAP"])
+        machine, _now, _state, _effects = drive(["HOLD", "HOLD", "TAP"])
         state, effects = machine.reset()
         self.assertEqual(state["mode"], "idle")
         self.assertEqual(state["highlight_index"], 0)
@@ -299,7 +299,7 @@ class ResetAndIgnoreTests(unittest.TestCase):
         self.assertEqual(effects, [])
 
     def test_reset_clears_a_sent_lamp(self) -> None:
-        machine, _now, _state, _effects = drive(["TAP", "SELECT", "SELECT"])
+        machine, _now, _state, _effects = drive(["HOLD", "SELECT", "SELECT"])
         state, effects = machine.reset()
         self.assertEqual(state["mode"], "idle")
         self.assertEqual(effects, ["LED idle"])
@@ -312,7 +312,7 @@ class ResetAndIgnoreTests(unittest.TestCase):
         state, effects = machine.handle("NOPE", "tap", 0.0)
         self.assertEqual(state, before)
         self.assertEqual(effects, [])
-        machine.handle("TAP", "tap", 0.0)
+        machine.handle("HOLD", "tap", 0.0)
         state, effects = machine.handle("LED idle", "tap", 7.0)
         self.assertEqual(state["mode"], "category")
         self.assertEqual(state["highlight_index"], 0)

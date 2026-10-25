@@ -1,6 +1,6 @@
 # CONTRACT.md: TapToTalk module interfaces
 
-Version: v1.2 (2026-10-25)
+Version: v1.3 (2026-10-25)
 
 Owners: firmware and bridge (Person 1), web and storage (Person 2), ai (Person 3).
 
@@ -8,6 +8,7 @@ This file is the source of truth for every message that crosses a module boundar
 
 ## Changelog
 
+- v1.3: a `TAP` in idle is ignored (FR20). A session still starts on `HOLD`.
 - v1.2: added the `HOLD_LONG` message for the 3-second direct nurse call (FR19), its keyboard key, and the key switch pull-up wiring note.
 - v1.1: added `LED phrase`, the `CFG hold_ms <n>` command, the patient profile file, audio clips, the no-activity alert, the mode-based button rules, and the direct nurse call.
 - v1.0: first contract.
@@ -63,7 +64,7 @@ This table is the single source for the state machine. The bridge and the Pico b
 
 | Input | Idle | Category mode | Phrase mode |
 | --- | --- | --- | --- |
-| `TAP` | Enter category mode, highlight the first category | Highlight the next category | Highlight the next phrase |
+| `TAP` | Ignored | Highlight the next category | Highlight the next phrase |
 | `HOLD` (1 s) | Start a session (see the profile) | Open the phrases in the highlighted category | Choose the highlighted phrase |
 | `HOLD_LONG` (3 s) | Send Call nurse directly (FR19) | Same as idle | Same as idle |
 | `SELECT` | Ignored | Open the phrases, same as `HOLD` | Choose the highlighted phrase |
