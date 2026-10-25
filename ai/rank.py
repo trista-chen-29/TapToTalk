@@ -1,14 +1,15 @@
 """Phrase ranking. CONTRACT.md section 8.
 
-Claude reorders the candidate ids. A timeout, error, or invalid response
-returns the candidate list unchanged. A successful ranking is remembered
-in memory for 60 seconds. Failures are not cached.
+Claude reorders the candidate ids. A timeout, error, invalid value, or
+invalid response returns the candidate list unchanged. A successful ranking
+is remembered in memory for 60 seconds. Failures are not cached.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import threading
 import time
@@ -18,6 +19,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+from bridge.phrases import load_phrases
+
+logger = logging.getLogger(__name__)
 
 _TIMEOUT_SECONDS = 3.0
 _CACHE_SECONDS = 60.0
@@ -98,7 +103,12 @@ def _ranking_context(
     context: dict[str, object],
     candidates: list[str],
 ) -> dict[str, object] | None:
-    """Keep the four contract fields. Anything else is dropped."""
+    """Keep the four contract fields, and only catalog ids as values.
+
+    Extra keys are dropped. ``last_selections`` keeps the newest five
+    strings. A category, selection, or candidate that is not in the catalog
+    rejects the whole request so nothing is sent.
+    """
     if not candidates:
         return None
     time_of_day = context.get("time_of_day")
@@ -113,6 +123,13 @@ def _ranking_context(
     if not isinstance(raw_selections, list):
         return None
     selections = [item for item in raw_selections if isinstance(item, str)][-5:]
+    phrase_ids, categories = _catalog_ids()
+    if (
+        category not in categories
+        or any(item not in phrase_ids for item in selections)
+        or any(item not in phrase_ids for item in candidates)
+    ):
+        return None
     payload = {
         "time_of_day": time_of_day,
         "category": category,
@@ -120,6 +137,13 @@ def _ranking_context(
         "candidates": candidates,
     }
     return {key: payload[key] for key in _ALLOWED_KEYS}
+
+
+def _catalog_ids() -> tuple[frozenset[str], frozenset[str]]:
+    catalog = load_phrases()
+    phrase_ids = frozenset(phrase["id"] for phrase in catalog["phrases"])
+    categories = frozenset(catalog["categories"])
+    return phrase_ids, categories
 
 
 def _call_with_deadline(client: object | None, payload: dict[str, object]) -> str:
@@ -134,6 +158,8 @@ def _call_with_deadline(client: object | None, payload: dict[str, object]) -> st
 
 def _invoke(client: object | None, payload: dict[str, object]) -> str:
     caller = _bound_client(client)
+    body = _payload_json(payload)
+    logger.info("%s", body)
     message = caller.messages.create(
         model=_model(),
         max_tokens=256,
@@ -155,16 +181,20 @@ def _bound_client(client: object | None) -> object:
     return created.with_options(timeout=_TIMEOUT_SECONDS, max_retries=0)
 
 
-def _prompt(payload: dict[str, object]) -> str:
-    body = json.dumps(
+def _payload_json(payload: dict[str, object]) -> str:
+    """The only JSON sent to Claude, in contract key order."""
+    return json.dumps(
         {key: payload[key] for key in _ALLOWED_KEYS},
         separators=(",", ":"),
     )
+
+
+def _prompt(payload: dict[str, object]) -> str:
     return (
         "Rank the candidate phrase ids using only the JSON object below. "
         "Reply with a JSON array of those ids in ranked order, each id once, "
         "and no other text.\n"
-        f"{body}"
+        f"{_payload_json(payload)}"
     )
 
 

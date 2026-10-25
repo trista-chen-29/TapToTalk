@@ -11,6 +11,7 @@ Playback uses miniaudio, which talks to Core Audio on this Mac.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import threading
@@ -36,8 +37,10 @@ _BEARER_RE = re.compile(r"Bearer\s+\S+", re.IGNORECASE)
 def speak(phrase_id: str, text: str) -> None:
     """Play a local catalog clip first; use Cartesia only as a fallback.
 
-    This synchronous helper must run off the bridge event loop. The bridge
-    remains responsible for selection confirmation and on-screen feedback.
+    Cartesia receives the catalog text for ``phrase_id``. A different
+    ``text`` is refused. This synchronous helper must run off the bridge
+    event loop. The bridge remains responsible for selection confirmation
+    and on-screen feedback.
     """
     if not isinstance(phrase_id, str) or not isinstance(text, str):
         raise TypeError("phrase_id and text must be strings")
@@ -48,12 +51,16 @@ def speak(phrase_id: str, text: str) -> None:
     try:
         profile = load_profile()
         catalog = load_phrases(language=profile["language"])
-        known_ids = {phrase["id"] for phrase in catalog["phrases"]}
+        known_text = {phrase["id"]: phrase["text"] for phrase in catalog["phrases"]}
         if (
             re.fullmatch(r"[a-z][a-z0-9_]*", phrase_id) is None
-            or phrase_id not in known_ids
+            or phrase_id not in known_text
         ):
             print("Speech skipped: unknown phrase id")
+            return
+        catalog_text = known_text[phrase_id]
+        if text != catalog_text:
+            print("Speech skipped: text does not match the catalog")
             return
         if not profile["audio_on"] or profile["output"] == "screen":
             return
@@ -84,10 +91,10 @@ def speak(phrase_id: str, text: str) -> None:
         return
 
     try:
-        audio = _synthesize(api_key, text)
+        audio = _synthesize(api_key, catalog_text)
         _play_wav(audio)
     except Exception as exc:
-        print(f"Cartesia speech failed: {_public_reason(exc, api_key)}")
+        print(f"Cartesia speech failed: {_public_reason(exc, api_key, catalog_text)}")
         return
     print("Played Cartesia audio.")
 
@@ -109,7 +116,7 @@ def synthesize(text: str) -> bytes:
     try:
         return _synthesize(api_key, text)
     except Exception as exc:
-        raise RuntimeError(_public_reason(exc, api_key)) from None
+        raise RuntimeError(_public_reason(exc, api_key, text)) from None
 
 
 def _synthesize(api_key: str, text: str) -> bytes:
@@ -177,15 +184,29 @@ def _play_wav(audio: bytes) -> None:
         device.close()
 
 
-def _public_reason(error: BaseException, api_key: str) -> str:
-    """Return an error reason with any API key removed."""
+def _public_reason(error: BaseException, api_key: str, request_text: str = "") -> str:
+    """Return an error reason with the API key and request text removed.
+
+    Cartesia puts the response body in the exception message, and that body
+    can quote the transcript. The request object itself is not printed.
+    """
     message = f"{type(error).__name__}: {error}".strip()
-    if api_key:
-        message = message.replace(api_key, "[redacted]")
+    message = _redact(message, api_key)
+    message = _redact(message, request_text)
     message = _SECRET_RE.sub("[redacted]", message)
     message = _BEARER_RE.sub("Bearer [redacted]", message)
     if len(message) > 500:
         message = message[:500] + "..."
+    return message
+
+
+def _redact(message: str, secret: str) -> str:
+    if secret == "":
+        return message
+    message = message.replace(secret, "[redacted]")
+    escaped = json.dumps(secret)[1:-1]
+    if escaped != secret:
+        message = message.replace(escaped, "[redacted]")
     return message
 
 
