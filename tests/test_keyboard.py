@@ -121,7 +121,7 @@ class KeyboardEventTests(unittest.IsolatedAsyncioTestCase):
         serial = Machine(CATALOG)
         keys = Machine(CATALOG)
         now = 0.0
-        for event in ("TAP", "TAP", "HOLD", "TAP", "SELECT"):
+        for event in ("HOLD", "TAP", "HOLD", "TAP", "SELECT"):
             serial_state, serial_effects = serial.handle(event, "tap", now)
             key_state, key_effects = keys.handle(event, "keyboard", now)
             self.assertEqual(serial_state, key_state)

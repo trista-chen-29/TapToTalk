@@ -1,4 +1,4 @@
-# main.py - TapToTalk Pico firmware (CONTRACT.md v1.2)
+# main.py - TapToTalk Pico firmware (CONTRACT.md v1.3)
 #
 # What it does:
 #   - Sends TAP, HOLD, HOLD_LONG and SELECT to the laptop over USB serial (contract section 1).
@@ -220,8 +220,8 @@ class Local:
         if event == "HOLD_LONG":
             self.go("alert")                      # direct nurse call, from any mode
         elif s == "idle":
-            if event == "TAP":
-                self.go("listening")              # category mode
+            if event == "HOLD":
+                self.go("listening")              # category mode; TAP ignored
         elif s == "listening":
             if event in ("HOLD", "SELECT"):
                 self.go("phrase")                 # open the phrases
