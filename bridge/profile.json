@@ -6,6 +6,7 @@
   "fixed_buttons": ["yes_yes", "pain_here", "person_nurse"],
   "language": "en",
   "hold_ms": 1000,
+  "touch_holdover_ms": 150,
   "audio_on": true,
   "idle_alert_minutes": 10
 }

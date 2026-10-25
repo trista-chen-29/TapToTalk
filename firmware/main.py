@@ -1,8 +1,9 @@
-# main.py - TapToTalk Pico firmware (CONTRACT.md v1.3)
+# main.py - TapToTalk Pico firmware (CONTRACT.md v1.7)
 #
 # What it does:
 #   - Sends TAP, HOLD, HOLD_LONG and SELECT to the laptop over USB serial (contract section 1).
-#   - Listens for "LED <state>" and "CFG hold_ms <n>" from the bridge (contract section 2).
+#   - Listens for "LED <state>", "CFG hold_ms <n>", and "CFG touch_holdover_ms <n>"
+#     from the bridge (contract section 2).
 #   - Sends nothing else.
 #   - Local mode: until the bridge sends its first LED command, the Pico lights the LED
 #     from your taps by itself (same rules as contract section 4), for testing and demos.
@@ -42,7 +43,9 @@ POLL_MS = 1                   # narrow KY-036 pulses were missed at 5 ms on the 
 
 TOUCH_ACTIVE_LOW = False      # True if the touch sensor reads 0 when touched
 KEY_ACTIVE_LOW = True         # HW-483 key module reads 0 when pressed
-TOUCH_HOLDOVER_MS = 150       # bridge gaps in the KY-036 pulse train (set 0 for a TTP223)
+TOUCH_HOLDOVER_MS = 150       # gaps in the KY-036 pulse train; CFG touch_holdover_ms
+TOUCH_HOLDOVER_MIN = 20       # CFG values outside this range are ignored
+TOUCH_HOLDOVER_MAX = 400
 HELD_HOLDOVER_MS = 500        # once HOLD is sent, a dropout shorter than this still counts as
                               # held, so a wobbly 3-second hold can reach HOLD_LONG
 
@@ -276,6 +279,13 @@ def handle_command(line):
             return
         if HOLD_MS_MIN <= value <= HOLD_MS_MAX and value < HOLD_LONG_MS:
             touch.hold_ms = value
+    elif len(parts) == 3 and parts[0] == "CFG" and parts[1] == "touch_holdover_ms":
+        try:
+            value = int(parts[2])
+        except ValueError:
+            return
+        if TOUCH_HOLDOVER_MIN <= value <= TOUCH_HOLDOVER_MAX:
+            touch.holdover_ms = value
     # Anything else is ignored: the contract says the Pico acknowledges nothing.
 
 
